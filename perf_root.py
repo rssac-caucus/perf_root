@@ -104,10 +104,8 @@ def find_nsec(qstr):
   dbgLog(LOG_DEBUG, "find_nsec:" + qstr + " len_tlds:" + str(len(tlds)))
   query = dns.message.make_query(qstr.lower(), 'NS', want_dnssec=True)
   resp = dns.query.udp(query, '192.168.1.1', ignore_unexpected=True)
-  #print(str(resp))
 
-  if resp.rcode() == 3 and resp.opcode() == 0: # NXDOMAIN response
-  #print(repr(resp.authority))
+  if resp.rcode() == 3 and resp.opcode() == 0: # NXDOMAIN
     for rr in resp.authority:
       if rr.rdclass == dns.rdataclass.IN and rr.rdtype == dns.rdatatype.NSEC:
         k1 = rr.to_text().split()[0].rstrip('.')
@@ -122,8 +120,18 @@ def find_nsec(qstr):
           tlds[k2] = True
           find_nsec(dn_inc(k2))
           find_nsec(dn_dec(k2))
+  elif resp.rcode() == 0 and resp.opcode() == 0: # NOERROR
+    print(str(resp))
+    for rr in resp.answer:
+      if rr.rdclass == dns.rdataclass.IN and rr.rdtype == dns.rdatatype.NS:
+        ns = rr.to_text().split()[0].rstrip('.')
+        if len(ns) > 0 and ns not in tlds:
+          dbgLog(LOG_DEBUG, "ns:" + ns)
+          tlds[ns] = True
+          find_nsec(dn_inc(ns))
+          find_nsec(dn_dec(ns))
   else:
-    pass # We need to handle the case where we don't get an NSEC RRSET back, but instead get a valid NS RRSET
+    dbgLog(LOG_WARN, "unhandled response:" + str(resp))
 
 # Increment a domain name for walking
 def dn_inc(dn):
@@ -136,9 +144,8 @@ def dn_inc(dn):
     else:
       return dn
   else:
-    return dn[:len(dn)-1] + chr(ord(dn[-1:]) + 1)
+    return dn[:-1] + chr(ord(dn[-1:]) + 1)
 
-# This is broken
 # Decrement a domain name for walking
 def dn_dec(dn):
   dbgLog(LOG_DEBUG, "dn_dec:" + dn)
@@ -148,7 +155,7 @@ def dn_dec(dn):
     else:
       return dn_dec(dn[:-1]) + 'a'
   else:
-    return dn[:len(dn)-1] + chr(ord(dn[-1:]) - 1)
+    return dn[:-1] + chr(ord(dn[-1:]) - 1)
 
     
 ###################
