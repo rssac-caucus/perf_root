@@ -17,20 +17,21 @@
 #
 #  Copyright (C) 2020, Andrew McConachie, <andrew@depht.com>
 
-import sys
-import os
 import datetime
-import signal
-import dns.resolver
-import dns.query
+import dns.exception
 import dns.message
+import dns.resolver
 import dns.rcode
 import dns.rdataclass
 import dns.rdatatype
-import threading
+import dns.query
 import hashlib
-import subprocess as subp
+import os
 import re
+import signal
+import subprocess
+import sys
+import threading
 import time
 
 #####################
@@ -45,7 +46,9 @@ LOG_LEVEL = LOG_DEBUG
 LOG_OUTPUT = 'tty' # 'tty' | 'file' | False
 LOG_FNAME = 'perf_root.log'
 LOG_SIZE = 1024 # Max logfile size in KB
-#sys.setrecursionlimit(1000)
+
+QUERY_TIMEOUT = 60 # seconds before timing out
+sys.setrecursionlimit(2000)
 
 ###########
 # Classes #
@@ -54,6 +57,10 @@ LOG_SIZE = 1024 # Max logfile size in KB
 ####################
 # GLOBAL FUNCTIONS #
 ####################
+
+def death(errStr=''):
+  print("FATAL:" + errStr)
+  sys.exit(1)
 
 # Logs message to LOG_FNAME or tty
 def dbgLog(lvl, dbgStr):
@@ -99,11 +106,19 @@ def dbgLog(lvl, dbgStr):
   elif LOG_OUTPUT == 'tty':
     print(outStr)
 
-def find_nsec(qstr):
+def find_tlds(qstr):
   global tlds
-  dbgLog(LOG_DEBUG, "find_nsec:" + qstr + " len_tlds:" + str(len(tlds)))
+  dbgLog(LOG_DEBUG, "find_tlds:" + qstr + " len_tlds:" + str(len(tlds)))
   query = dns.message.make_query(qstr.lower(), 'NS', want_dnssec=True)
-  resp = dns.query.udp(query, '192.168.1.1', ignore_unexpected=True)
+
+  try:
+    resp = dns.query.udp(query, '192.168.1.1', ignore_unexpected=True, timeout=QUERY_TIMEOUT)
+  except dns.exception.Timeout:
+    dbgLog(LOG_ERROR, "find_tlds: query timeout " + qstr + " len_tlds:" + str(len(tlds)))
+    return find_tlds(qstr) # Could get us stuck in an infinite loop
+  except dns.query.BadResponse:
+    dbgLog(LOG_ERROR, "find_tlds: bad response " + qstr + " len_tlds:" + str(len(tlds)))
+    return find_tlds(qstr) # Could get us stuck in an infinite loop
 
   if resp.rcode() == 3 and resp.opcode() == 0: # NXDOMAIN
     for rr in resp.authority:
@@ -113,42 +128,40 @@ def find_nsec(qstr):
         if len(k1) > 0 and k1 not in tlds:
           dbgLog(LOG_DEBUG, "k1:" + k1)
           tlds[k1] = True
-          find_nsec(dn_inc(k1))
-          find_nsec(dn_dec(k1))
+          find_tlds(dn_inc(k1))
+          find_tlds(dn_dec(k1))
         if len(k2) > 0 and k2 not in tlds:
           dbgLog(LOG_DEBUG, "k2:" + k2)
           tlds[k2] = True
-          find_nsec(dn_inc(k2))
-          find_nsec(dn_dec(k2))
+          find_tlds(dn_inc(k2))
+          find_tlds(dn_dec(k2))
   elif resp.rcode() == 0 and resp.opcode() == 0: # NOERROR
-    print(str(resp))
     for rr in resp.answer:
       if rr.rdclass == dns.rdataclass.IN and rr.rdtype == dns.rdatatype.NS:
         ns = rr.to_text().split()[0].rstrip('.')
         if len(ns) > 0 and ns not in tlds:
           dbgLog(LOG_DEBUG, "ns:" + ns)
           tlds[ns] = True
-          find_nsec(dn_inc(ns))
-          find_nsec(dn_dec(ns))
+          find_tlds(dn_inc(ns))
+          find_tlds(dn_dec(ns))
   else:
     dbgLog(LOG_WARN, "unhandled response:" + str(resp))
 
 # Increment a domain name for walking
 def dn_inc(dn):
-  if ord(dn[-1:]) == 122: # lowercase 'z'
-    if len(dn) < 62: # Maximum DNS label length == 63
+  if len(dn) < 63: # Maximum DNS label length == 63
+    return dn + 'a'
+  else:
+    if ord(dn[-1:]) == 122: # lowercase 'z'
       if len(dn) == 1:
-        return dn + 'a'
+        return dn # This will likely never happen
       else:
         return dn_inc(dn[:-1]) + 'z'
     else:
-      return dn
-  else:
-    return dn[:-1] + chr(ord(dn[-1:]) + 1)
+      return dn[:-1] + chr(ord(dn[-1:]) + 1)
 
 # Decrement a domain name for walking
 def dn_dec(dn):
-  dbgLog(LOG_DEBUG, "dn_dec:" + dn)
   if ord(dn[-1:]) == 97: # lowercase 'a'
     if len(dn) == 1: # We can't return a zero-length string
       return dn
@@ -169,11 +182,9 @@ if LOG_OUTPUT == 'file':
     death("Unable to open debug log file")
 
 dbgLog(LOG_DEBUG, "Begin Execution")
+dbgLog(LOG_DEBUG, "recursion_limit:" + str(sys.getrecursionlimit()))
 
 tlds = {}
-
-find_nsec('verge')
-print(repr(sorted(tlds)))
-print("tlds_len:" + str(len(tlds)))
-        
-
+find_tlds('verge')
+for tld in sorted(tlds):
+  print(tld.upper())
