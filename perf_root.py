@@ -27,6 +27,7 @@ import dns.rdatatype
 import dns.query
 import hashlib
 import os
+import random
 import re
 import signal
 import subprocess
@@ -47,8 +48,9 @@ LOG_OUTPUT = 'tty' # 'tty' | 'file' | False
 LOG_FNAME = 'perf_root.log'
 LOG_SIZE = 1024 # Max logfile size in KB
 
-QUERY_TIMEOUT = 60 # seconds before timing out
-sys.setrecursionlimit(2000)
+QUERY_TIMEOUT = 30 # seconds before timing out
+NUM_TLDS = 2000 # How many tlds to find via walking, zero for all of them
+DNS_SERVER = '192.168.1.1' # We'll need to get fancier eventually
 
 ###########
 # Classes #
@@ -106,46 +108,101 @@ def dbgLog(lvl, dbgStr):
   elif LOG_OUTPUT == 'tty':
     print(outStr)
 
-def find_tlds(qstr):
-  global tlds
-  dbgLog(LOG_DEBUG, "find_tlds:" + qstr + " len_tlds:" + str(len(tlds)))
+# Send a single query and return a dnspython response
+def send_query(qstr):
   query = dns.message.make_query(qstr.lower(), 'NS', want_dnssec=True)
 
   try:
-    resp = dns.query.udp(query, '192.168.1.1', ignore_unexpected=True, timeout=QUERY_TIMEOUT)
+    rv = dns.query.udp(query, DNS_SERVER, ignore_unexpected=True, timeout=QUERY_TIMEOUT)
   except dns.exception.Timeout:
-    dbgLog(LOG_ERROR, "find_tlds: query timeout " + qstr + " len_tlds:" + str(len(tlds)))
-    return find_tlds(qstr) # Could get us stuck in an infinite loop
+    dbgLog(LOG_ERROR, "send_query: query timeout " + qstr)
+    return None
   except dns.query.BadResponse:
-    dbgLog(LOG_ERROR, "find_tlds: bad response " + qstr + " len_tlds:" + str(len(tlds)))
-    return find_tlds(qstr) # Could get us stuck in an infinite loop
+    dbgLog(LOG_ERROR, "send_query: bad response " + qstr)
+    return None
 
+  return rv
+
+# Process the response from a DNS query
+# Return the two adjacent domain names for NXDOMAIN
+# Return the same name twice for NOERROR
+# Return None None for everything else, including when we get to the end of the zone
+def handle_response(resp):
   if resp.rcode() == 3 and resp.opcode() == 0: # NXDOMAIN
     for rr in resp.authority:
       if rr.rdclass == dns.rdataclass.IN and rr.rdtype == dns.rdatatype.NSEC:
         k1 = rr.to_text().split()[0].rstrip('.')
         k2 = rr.to_text().split()[4].rstrip('.')
-        if len(k1) > 0 and k1 not in tlds:
-          dbgLog(LOG_DEBUG, "k1:" + k1)
-          tlds[k1] = True
-          find_tlds(dn_inc(k1))
-          find_tlds(dn_dec(k1))
-        if len(k2) > 0 and k2 not in tlds:
-          dbgLog(LOG_DEBUG, "k2:" + k2)
-          tlds[k2] = True
-          find_tlds(dn_inc(k2))
-          find_tlds(dn_dec(k2))
+        if len(k1) == 0: # Ignore the zone apex NSEC RR
+          continue
+        dbgLog(LOG_DEBUG, "k1:" + k1 + " k2:" + k2)
+        return k1, k2
   elif resp.rcode() == 0 and resp.opcode() == 0: # NOERROR
     for rr in resp.answer:
       if rr.rdclass == dns.rdataclass.IN and rr.rdtype == dns.rdatatype.NS:
         ns = rr.to_text().split()[0].rstrip('.')
-        if len(ns) > 0 and ns not in tlds:
-          dbgLog(LOG_DEBUG, "ns:" + ns)
-          tlds[ns] = True
-          find_tlds(dn_inc(ns))
-          find_tlds(dn_dec(ns))
+        dbgLog(LOG_DEBUG, "ns:" + ns)
+        return ns, ns
+  else: # Need to handle SERVFAIL 
+    dbgLog(LOG_WARN, "handle_response unhandled response:" + str(resp))
+
+  return None, None
+
+# Iteratively find X tlds surrounding qstr
+def find_tlds(qstr, x):
+  dbgLog(LOG_DEBUG, "find_tlds:" + qstr + " x:" + str(x))
+  tlds = {}
+
+  # The first time is special
+  resp = send_query(qstr)
+  if not resp:
+    death("FATAL: First DNS query failed " + qstr)
+
+  dn_down, dn_up = handle_response(resp)
+  if not dn_down or not dn_up:
+    dn_down = qstr
+    dn_up = qstr
   else:
-    dbgLog(LOG_WARN, "unhandled response:" + str(resp))
+    tlds[dn_down] = True
+    tlds[dn_up] = True
+    dn_down = dn_dec(dn_down)
+    dn_up = dn_inc(dn_up)
+
+  # Keep going until we find x TLDs or all TLDs
+  going_up = True
+  going_down = True
+  while True:
+    dbgLog(LOG_DEBUG, "find_tlds_while dn_down:" + dn_down + " dn_up:" + dn_up + " len_tlds:" + str(len(tlds)))
+    if len(tlds) >= x or not going_down and not going_up:
+      return sorted(tlds)[:x]
+
+    if going_down:
+      resp = send_query(dn_down)
+      if resp == None:
+        dbgLog(LOG_WARN, "find_tlds walk_down query failed for " + qstr)
+      dn_down, junk = handle_response(resp)
+      if dn_down == None:
+        dbgLog(LOG_DEBUG, "find_tlds finished walking down")
+        going_down = False
+        dn_down = '.'
+      else:
+        if len(dn_down) > 0:
+          tlds[dn_down] = True
+        dn_down = dn_dec(dn_down)
+
+    if going_up:
+      resp = send_query(dn_up)
+      if resp == None:
+        dbgLog(LOG_WARN, "find_tlds walk_up query failed for " + qstr)
+      junk, dn_up = handle_response(resp)
+      if dn_up == None:
+        dbgLog(LOG_WARN, "find_tlds finished walking up")
+        going_up = False
+        dn_up = '.'
+      else:
+        if len(dn_up) > 0:
+          tlds[dn_up] = True
+        dn_up = dn_inc(dn_up)
 
 # Increment a domain name for walking
 def dn_inc(dn):
@@ -153,23 +210,25 @@ def dn_inc(dn):
     return dn + 'a'
   else:
     if ord(dn[-1:]) == 122: # lowercase 'z'
-      if len(dn) == 1:
-        return dn # This will likely never happen
-      else:
-        return dn_inc(dn[:-1]) + 'z'
+      return dn_inc(dn[:-1]) + 'z'
     else:
       return dn[:-1] + chr(ord(dn[-1:]) + 1)
 
 # Decrement a domain name for walking
 def dn_dec(dn):
-  if ord(dn[-1:]) == 97: # lowercase 'a'
-    if len(dn) == 1: # We can't return a zero-length string
-      return dn
+  if len(dn) == 1: # min len == 1
+    if dn == 'a':
+      return 'a' # nothing comes before 'a'
     else:
-      return dn_dec(dn[:-1]) + 'a'
+      return chr(ord(dn[0] - 1))
   else:
-    return dn[:-1] + chr(ord(dn[-1:]) - 1)
-
+    if dn[-1:] == 'a':
+      return dn[:-1]
+    else:
+      if len(dn) < 63:
+        return dn[:-1] + chr(ord(dn[-1:]) - 1) + 'z'
+      else:
+        return dn[:-1] + chr(ord(dn[-1:]) - 1)
     
 ###################
 # BEGIN EXECUTION #
@@ -182,9 +241,8 @@ if LOG_OUTPUT == 'file':
     death("Unable to open debug log file")
 
 dbgLog(LOG_DEBUG, "Begin Execution")
-dbgLog(LOG_DEBUG, "recursion_limit:" + str(sys.getrecursionlimit()))
+random.seed()
 
-tlds = {}
-find_tlds('verge')
-for tld in sorted(tlds):
-  print(tld.upper())
+# This ranges from 'aa' to 'zz'
+print(find_tlds(chr(random.randint(97, 122)) + chr(random.randint(97, 122)), NUM_TLDS))
+
