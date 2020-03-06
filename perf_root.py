@@ -26,6 +26,7 @@ import dns.rdataclass
 import dns.rdatatype
 import dns.query
 import hashlib
+import ipaddress
 import os
 import random
 import re
@@ -48,18 +49,43 @@ LOG_OUTPUT = 'tty' # 'tty' | 'file' | False
 LOG_FNAME = 'perf_root.log'
 LOG_SIZE = 1024 # Max logfile size in KB
 
-QUERY_TIMEOUT = 30 # seconds before timing out
-NUM_TLDS = 2000 # How many tlds to find via walking, zero for all of them
-DNS_SERVER = '192.168.1.1' # We'll need to get fancier eventually
+QUERY_TIMEOUT = 30 # seconds before timing out a DNS query
+NUM_TLDS = 10 # How many tlds to find via walking
+ROOT_SERVERS = {} # A dictionary of RootServer objects
+NUM_TESTS = 2 # How many timed queries to perform, for each TLD, for each root server
 
 ###########
 # Classes #
 ###########
+class RootServer:
+  def __init__(self):
+    self.ipv4 = ''
+    self.ipv6 = ''
+    self.times_v4 = {}
+    self.times_v6 = {}
+
+  def __repr__(self):
+    return "ipv4:" + str(self.ipv4) + " ipv6:" + str(self.ipv6) + " times_v4:" + repr(self.times_v4) + " times_v6:" + repr(self.times_v6)
+
+  def add_time_v4(self, tld, time):
+    if not tld in self.times_v4:
+      self.times_v4[tld] = [time]
+    else:
+      self.times_v4[tld].append(time)
+
+  def add_time_v6(self, tld, time):
+    if not tld in self.times_v6:
+      self.times_v6[tld] = [time]
+    else:
+      self.times_v6[tld].append(time)
+
+  # Convert this object to YAML and return it
+  def to_yaml(self):
+    pass
 
 ####################
 # GLOBAL FUNCTIONS #
 ####################
-
 def death(errStr=''):
   print("FATAL:" + errStr)
   sys.exit(1)
@@ -108,26 +134,29 @@ def dbgLog(lvl, dbgStr):
   elif LOG_OUTPUT == 'tty':
     print(outStr)
 
-# Send a single query and return a dnspython response
-def send_query(qstr):
+# Send a single walk query and return a dnspython response message
+def send_walk_query(qstr):
   query = dns.message.make_query(qstr.lower(), 'NS', want_dnssec=True)
 
+  server = str(ROOT_SERVERS[random.choice(list(ROOT_SERVERS))].ipv4)
+  dbgLog(LOG_DEBUG, "Using server:" + server)
+
   try:
-    rv = dns.query.udp(query, DNS_SERVER, ignore_unexpected=True, timeout=QUERY_TIMEOUT)
+    rv = dns.query.udp(query, server, ignore_unexpected=True, timeout=QUERY_TIMEOUT)
   except dns.exception.Timeout:
-    dbgLog(LOG_ERROR, "send_query: query timeout " + qstr)
+    dbgLog(LOG_ERROR, "send_walk_query: query timeout " + qstr)
     return None
   except dns.query.BadResponse:
-    dbgLog(LOG_ERROR, "send_query: bad response " + qstr)
+    dbgLog(LOG_ERROR, "send_walk_query: bad response " + qstr)
     return None
 
   return rv
 
-# Process the response from a DNS query
+# Process the response from a DNS walk query
 # Return the two adjacent domain names for NXDOMAIN
 # Return the same name twice for NOERROR
 # Return None None for everything else, including when we get to the end of the zone
-def handle_response(resp):
+def handle_walk_response(resp):
   if resp.rcode() == 3 and resp.opcode() == 0: # NXDOMAIN
     for rr in resp.authority:
       if rr.rdclass == dns.rdataclass.IN and rr.rdtype == dns.rdatatype.NSEC:
@@ -137,28 +166,44 @@ def handle_response(resp):
           continue
         dbgLog(LOG_DEBUG, "k1:" + k1 + " k2:" + k2)
         return k1, k2
+    for rr in resp.answer:
+      if rr.rdclass == dns.rdataclass.IN and rr.rdtype == dns.rdatatype.NSEC:
+        k1 = rr.to_text().split()[0].rstrip('.')
+        k2 = rr.to_text().split()[4].rstrip('.')
+        if len(k1) == 0: # Ignore the zone apex NSEC RR
+          continue
+        dbgLog(LOG_DEBUG, "k1:" + k1 + " k2:" + k2)
+        return k1, k2
+
   elif resp.rcode() == 0 and resp.opcode() == 0: # NOERROR
+    for rr in resp.authority:
+      if rr.rdclass == dns.rdataclass.IN and rr.rdtype == dns.rdatatype.NS:
+        ns = rr.to_text().split()[0].rstrip('.')
+        dbgLog(LOG_DEBUG, "ns:" + ns)
+        return ns, ns
     for rr in resp.answer:
       if rr.rdclass == dns.rdataclass.IN and rr.rdtype == dns.rdatatype.NS:
         ns = rr.to_text().split()[0].rstrip('.')
         dbgLog(LOG_DEBUG, "ns:" + ns)
         return ns, ns
+
   else: # Need to handle SERVFAIL 
-    dbgLog(LOG_WARN, "handle_response unhandled response:" + str(resp))
+    dbgLog(LOG_WARN, "handle_walk_response unhandled response:" + str(resp))
 
   return None, None
 
 # Iteratively find X tlds surrounding qstr
+# Returns list of X tlds alpha sorted
 def find_tlds(qstr, x):
   dbgLog(LOG_DEBUG, "find_tlds:" + qstr + " x:" + str(x))
   tlds = {}
 
   # The first time is special
-  resp = send_query(qstr)
+  resp = send_walk_query(qstr)
   if not resp:
     death("FATAL: First DNS query failed " + qstr)
 
-  dn_down, dn_up = handle_response(resp)
+  dn_down, dn_up = handle_walk_response(resp)
   if not dn_down or not dn_up:
     dn_down = qstr
     dn_up = qstr
@@ -177,10 +222,10 @@ def find_tlds(qstr, x):
       return sorted(tlds)[:x]
 
     if going_down:
-      resp = send_query(dn_down)
+      resp = send_walk_query(dn_down)
       if resp == None:
         dbgLog(LOG_WARN, "find_tlds walk_down query failed for " + qstr)
-      dn_down, junk = handle_response(resp)
+      dn_down, junk = handle_walk_response(resp)
       if dn_down == None:
         dbgLog(LOG_DEBUG, "find_tlds finished walking down")
         going_down = False
@@ -191,10 +236,10 @@ def find_tlds(qstr, x):
         dn_down = dn_dec(dn_down)
 
     if going_up:
-      resp = send_query(dn_up)
+      resp = send_walk_query(dn_up)
       if resp == None:
         dbgLog(LOG_WARN, "find_tlds walk_up query failed for " + qstr)
-      junk, dn_up = handle_response(resp)
+      junk, dn_up = handle_walk_response(resp)
       if dn_up == None:
         dbgLog(LOG_WARN, "find_tlds finished walking up")
         going_up = False
@@ -229,7 +274,43 @@ def dn_dec(dn):
         return dn[:-1] + chr(ord(dn[-1:]) - 1) + 'z'
       else:
         return dn[:-1] + chr(ord(dn[-1:]) - 1)
-    
+
+def parse_root_hints(root_hints='named.cache'):
+  rv = {}
+  fn = open(root_hints, 'r')
+  for line in fn:
+    if line[0] != ';' and line[0] != '.':
+      rsi = line.split()[0].rstrip('.')
+      if not rsi in rv:
+        rv[rsi] = RootServer()
+
+      ip = ipaddress.ip_address(line.split()[3])
+      if ip.version == 4:
+        rv[rsi].ipv4 = ip
+      elif ip.version == 6:
+        rv[rsi].ipv6 = ip
+
+  fn.close()
+  return rv
+
+# Time the query and response to a root server IPv4 address
+# Returns time in seconds as float for the query and -1 on failure
+def timed_query_v4(tld, ip):
+  query = dns.message.make_query(tld, 'NS')
+
+  start_time = time.perf_counter()
+  try:
+    dns.query.udp(query, str(ip), ignore_unexpected=True, timeout=QUERY_TIMEOUT)
+  except dns.exception.Timeout:
+    dbgLog(LOG_ERROR, "timed_query_v4: query timeout " + tld)
+    return -1
+  except dns.query.BadResponse:
+    dbgLog(LOG_ERROR, "timed_query_v4: bad response " + tld)
+    return -1
+
+  dbgLog(LOG_DEBUG, "timed_query_v4 time: " + str(time.perf_counter() - start_time))
+  return time.perf_counter() - start_time
+
 ###################
 # BEGIN EXECUTION #
 ###################
@@ -243,6 +324,16 @@ if LOG_OUTPUT == 'file':
 dbgLog(LOG_DEBUG, "Begin Execution")
 random.seed()
 
-# This ranges from 'aa' to 'zz'
-print(find_tlds(chr(random.randint(97, 122)) + chr(random.randint(97, 122)), NUM_TLDS))
+ROOT_SERVERS = parse_root_hints()
 
+# This ranges from 'aa' to 'zz'
+tlds = find_tlds(chr(random.randint(97, 122)) + chr(random.randint(97, 122)), NUM_TLDS)
+#print(find_tlds('uk', NUM_TLDS))
+
+for ii in range(1, NUM_TESTS + 1):
+  dbgLog(LOG_DEBUG, "Begin test round " + str(ii))
+  for rsi in ROOT_SERVERS:
+    for tld in tlds:
+      ROOT_SERVERS[rsi].add_time_v4(tld, timed_query_v4(tld, ROOT_SERVERS[rsi].ipv4))
+
+print(repr(ROOT_SERVERS))
