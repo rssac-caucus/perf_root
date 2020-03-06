@@ -25,15 +25,15 @@ import dns.rcode
 import dns.rdataclass
 import dns.rdatatype
 import dns.query
-import hashlib
+#import hashlib
 import ipaddress
+import json
 import os
 import random
-import re
-import signal
-import subprocess
+#import re
+#import signal
+#import subprocess
 import sys
-import threading
 import time
 
 #####################
@@ -80,8 +80,8 @@ class RootServer:
       self.times_v6[tld].append(time)
 
   # Convert this object to YAML and return it
-  def to_yaml(self):
-    pass
+  def to_json(self):
+    return json.dumps(self.times_v4) + "\n" + json.dumps(self.times_v6)
 
 ####################
 # GLOBAL FUNCTIONS #
@@ -106,15 +106,8 @@ def dbgLog(lvl, dbgStr):
   }
 
   dt = datetime.datetime.now()
-  #ts = dt.strftime("%b %d %H:%M:%S.%f")
   ts = dt.strftime("%H:%M:%S.%f")
-  outStr = ts + "> " + logPrefix[lvl] + "> " + dbgStr
-
-  if LOG_LEVEL == LOG_DEBUG:
-    outStr += "> "
-    for thr in threading.enumerate():
-      outStr += thr.name + " "
-    outStr.rstrip("")
+  outStr = ts + "> " + logPrefix[lvl] + "> " + dbgStr.strip()
 
   if LOG_OUTPUT == 'file':
     global LOG_HANDLE
@@ -225,7 +218,7 @@ def find_tlds(qstr, x):
       resp = send_walk_query(dn_down)
       if resp == None:
         dbgLog(LOG_WARN, "find_tlds walk_down query failed for " + qstr)
-      dn_down, junk = handle_walk_response(resp)
+      dn_down, _ = handle_walk_response(resp)
       if dn_down == None:
         dbgLog(LOG_DEBUG, "find_tlds finished walking down")
         going_down = False
@@ -239,7 +232,7 @@ def find_tlds(qstr, x):
       resp = send_walk_query(dn_up)
       if resp == None:
         dbgLog(LOG_WARN, "find_tlds walk_up query failed for " + qstr)
-      junk, dn_up = handle_walk_response(resp)
+      _, dn_up = handle_walk_response(resp)
       if dn_up == None:
         dbgLog(LOG_WARN, "find_tlds finished walking up")
         going_up = False
@@ -336,4 +329,7 @@ for ii in range(1, NUM_TESTS + 1):
     for tld in tlds:
       ROOT_SERVERS[rsi].add_time_v4(tld, timed_query_v4(tld, ROOT_SERVERS[rsi].ipv4))
 
-print(repr(ROOT_SERVERS))
+#print(repr(ROOT_SERVERS))
+
+for rsi in ROOT_SERVERS:
+  print(ROOT_SERVERS[rsi].to_json())
