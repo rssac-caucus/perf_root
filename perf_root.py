@@ -77,7 +77,11 @@ class RootServer:
 
   # Convert this object to YAML and return it
   def to_json(self):
-    return json.dumps(self.times_v4) + "\n" + json.dumps(self.times_v6)
+    rv = {}
+    rv['ipv4'] = self.times_v4
+    rv['ipv6'] = self.times_v6
+
+    return json.dumps(rv) #+ "\n" + json.dumps(self.times_v6)
 
 ####################
 # GLOBAL FUNCTIONS #
@@ -137,11 +141,11 @@ def fancy_output(str):
   if len(str) > window:
     dbgLog(LOG_ERROR, "fancy_output: print window exceeded")
     return
-  
+
   sys.stdout.write(str)
   for ii in range(window - len(str)):
     sys.stdout.write(' ')
-    
+
   sys.stdout.flush()
 
 # Send a single walk query and return a dnspython response message
@@ -323,14 +327,14 @@ def timed_query_v4(tld, ip):
 ###################
 # BEGIN EXECUTION #
 ###################
-# Enable debugging
+# Enable file debugging if enabled
 if LOG_OUTPUT == 'file':
   try:
     LOG_HANDLE = open(LOG_FNAME, 'w', 1)
   except:
     death("Unable to open debug log file")
 
-# Set signal handles
+# Set signal handlers
 signal.signal(signal.SIGINT, euthanize)
 signal.signal(signal.SIGTERM, euthanize)
 signal.signal(signal.SIGABRT, euthanize)
@@ -338,6 +342,7 @@ signal.signal(signal.SIGALRM, euthanize)
 signal.signal(signal.SIGSEGV, euthanize)
 signal.signal(signal.SIGHUP, euthanize)
 
+# CLI options
 ap = argparse.ArgumentParser(description='Test DNS Root Servers', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 ap.add_argument('-v', '--verbose', action='count', default=0,
                   dest='verbose', help='Verbose output, repeat for increased verbosity')
