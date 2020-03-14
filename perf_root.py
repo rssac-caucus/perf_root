@@ -41,17 +41,13 @@ import time
 # GLOBALS #
 ###########
 # Logging constants
-LOG_ERROR = 1
-LOG_WARN = 2
-LOG_INFO = 3
-LOG_DEBUG = 4
-LOG_LEVEL = LOG_DEBUG
+LOG_ERROR = 0
+LOG_WARN = 1
+LOG_INFO = 2
+LOG_DEBUG = 3
 LOG_OUTPUT = 'tty' # 'tty' | 'file' | False
 LOG_FNAME = 'perf_root.log'
 LOG_SIZE = 1024 # Max logfile size in KB
-
-# Globals
-ROOT_SERVERS = {} # A dictionary of RootServer objects
 
 
 ###########
@@ -86,6 +82,10 @@ class RootServer:
 ####################
 # GLOBAL FUNCTIONS #
 ####################
+def euthanize(signal, frame):
+  print("SIG-" + str(signal) + " caught, exiting")
+  sys.exit(1)
+
 def death(errStr=''):
   print("FATAL:" + errStr)
   sys.exit(1)
@@ -127,10 +127,25 @@ def dbgLog(lvl, dbgStr):
   elif LOG_OUTPUT == 'tty':
     print(outStr)
 
+# Fancier output than normal debug logging
+def fancy_output(str):
+  window = 30
+
+  if LOG_LEVEL >= LOG_DEBUG:
+    return
+
+  if len(str) > window:
+    dbgLog(LOG_ERROR, "fancy_output: print window exceeded")
+    return
+  
+  sys.stdout.write(str)
+  for ii in range(window - len(str)):
+    sys.stdout.write(' ')
+    
+  sys.stdout.flush()
+
 # Send a single walk query and return a dnspython response message
 def send_walk_query(qstr):
-  global args
-
   query = dns.message.make_query(qstr.lower(), 'NS', want_dnssec=True)
   server = str(ROOT_SERVERS[random.choice(list(ROOT_SERVERS))].ipv4)
   dbgLog(LOG_DEBUG, "Using server:" + server)
@@ -290,7 +305,6 @@ def parse_root_hints(root_hints):
 # Time the query and response to a root server IPv4 address
 # Returns time in seconds as float for the query and -1 on failure
 def timed_query_v4(tld, ip):
-  global args
   query = dns.message.make_query(tld, 'NS')
 
   start_time = time.perf_counter()
@@ -316,45 +330,54 @@ if LOG_OUTPUT == 'file':
   except:
     death("Unable to open debug log file")
 
-dbgLog(LOG_DEBUG, "Begin Execution")
-random.seed()
-
 # Set signal handles
-signal.signal(signal.SIGINT, death)
-signal.signal(signal.SIGTERM, death)
-signal.signal(signal.SIGABRT, death)
-signal.signal(signal.SIGALRM, death)
-signal.signal(signal.SIGSEGV, death)
-signal.signal(signal.SIGHUP, death)
+signal.signal(signal.SIGINT, euthanize)
+signal.signal(signal.SIGTERM, euthanize)
+signal.signal(signal.SIGABRT, euthanize)
+signal.signal(signal.SIGALRM, euthanize)
+signal.signal(signal.SIGSEGV, euthanize)
+signal.signal(signal.SIGHUP, euthanize)
 
-ap = argparse.ArgumentParser(description='Test root servers')
-ap.add_argument('-r', '--root-hints', type=str, action='store', default='named.cache',
-                  dest='root_hints', help='Alternative root hints file')
-ap.add_argument('-o', '--out-file', type=str, action='store', default='perf_root.out',
-                  dest='out_file', help='Filename for output')
+ap = argparse.ArgumentParser(description='Test DNS Root Servers', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 ap.add_argument('-v', '--verbose', action='count', default=0,
                   dest='verbose', help='Verbose output, repeat for increased verbosity')
+ap.add_argument('-r', '--root-hints', type=str, action='store', default='named.cache',
+                  dest='root_hints', help='Root hints file')
+ap.add_argument('-o', '--out-file', type=str, action='store', default='perf_root.out',
+                  dest='out_file', help='Filename for output')
 ap.add_argument('-q', '--query-timeout', type=int, action='store', default=30,
-                  dest='query_timeout', help='DNS query timeout')
+                  dest='query_timeout', help='DNS query timeout in seconds')
 ap.add_argument('-n', '--num-tlds', type=int, action='store', default=10,
                   dest='num_tlds', help='Number of TLDs to test')
 ap.add_argument('-t', '--num-tests', type=int, action='store', default=2,
                   dest='num_tests', help='Number of tests per-TLS')
 args = ap.parse_args()
 
+LOG_LEVEL = min(args.verbose, LOG_DEBUG)
+dbgLog(LOG_DEBUG, "Begin Execution")
+random.seed()
+
 ROOT_SERVERS = parse_root_hints(args.root_hints)
 
 # This ranges from 'aa' to 'zz'
 tlds = find_tlds(chr(random.randint(97, 122)) + chr(random.randint(97, 122)), args.num_tlds)
-#print(find_tlds('uk', NUM_TLDS))
+fancy_output("Found " + str(len(tlds)) + " TLDs")
+time.sleep(1)
 
 for ii in range(1, args.num_tests + 1):
-  dbgLog(LOG_DEBUG, "Begin test round " + str(ii))
+  fancy_output("\rStarting test round " + str(ii))
+  dbgLog(LOG_DEBUG, "Starting test round " + str(ii))
+
+  time.sleep(1)
   for rsi in ROOT_SERVERS:
+    fancy_output("\rTesting " + rsi)
     for tld in tlds:
       ROOT_SERVERS[rsi].add_time_v4(tld, timed_query_v4(tld, ROOT_SERVERS[rsi].ipv4))
 
-#print(repr(ROOT_SERVERS))
+fancy_output("\rFinished testing")
 
 for rsi in ROOT_SERVERS:
   print(ROOT_SERVERS[rsi].to_json())
+
+print()
+sys.exit(0)
