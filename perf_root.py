@@ -17,6 +17,7 @@
 #
 #  Copyright (C) 2020, Andrew McConachie, <andrew@depht.com>
 
+import argparse
 import datetime
 import dns.exception
 import dns.message
@@ -31,14 +32,14 @@ import json
 import os
 import random
 #import re
-#import signal
+import signal
 #import subprocess
 import sys
 import time
 
-#####################
-# DEFAULT CONSTANTS #
-#####################
+###########
+# GLOBALS #
+###########
 # Logging constants
 LOG_ERROR = 1
 LOG_WARN = 2
@@ -49,10 +50,9 @@ LOG_OUTPUT = 'tty' # 'tty' | 'file' | False
 LOG_FNAME = 'perf_root.log'
 LOG_SIZE = 1024 # Max logfile size in KB
 
-QUERY_TIMEOUT = 30 # seconds before timing out a DNS query
-NUM_TLDS = 10 # How many tlds to find via walking
+# Globals
 ROOT_SERVERS = {} # A dictionary of RootServer objects
-NUM_TESTS = 2 # How many timed queries to perform, for each TLD, for each root server
+
 
 ###########
 # Classes #
@@ -129,13 +129,14 @@ def dbgLog(lvl, dbgStr):
 
 # Send a single walk query and return a dnspython response message
 def send_walk_query(qstr):
-  query = dns.message.make_query(qstr.lower(), 'NS', want_dnssec=True)
+  global args
 
+  query = dns.message.make_query(qstr.lower(), 'NS', want_dnssec=True)
   server = str(ROOT_SERVERS[random.choice(list(ROOT_SERVERS))].ipv4)
   dbgLog(LOG_DEBUG, "Using server:" + server)
 
   try:
-    rv = dns.query.udp(query, server, ignore_unexpected=True, timeout=QUERY_TIMEOUT)
+    rv = dns.query.udp(query, server, ignore_unexpected=True, timeout=args.query_timeout)
   except dns.exception.Timeout:
     dbgLog(LOG_ERROR, "send_walk_query: query timeout " + qstr)
     return None
@@ -268,7 +269,7 @@ def dn_dec(dn):
       else:
         return dn[:-1] + chr(ord(dn[-1:]) - 1)
 
-def parse_root_hints(root_hints='named.cache'):
+def parse_root_hints(root_hints):
   rv = {}
   fn = open(root_hints, 'r')
   for line in fn:
@@ -289,11 +290,12 @@ def parse_root_hints(root_hints='named.cache'):
 # Time the query and response to a root server IPv4 address
 # Returns time in seconds as float for the query and -1 on failure
 def timed_query_v4(tld, ip):
+  global args
   query = dns.message.make_query(tld, 'NS')
 
   start_time = time.perf_counter()
   try:
-    dns.query.udp(query, str(ip), ignore_unexpected=True, timeout=QUERY_TIMEOUT)
+    dns.query.udp(query, str(ip), ignore_unexpected=True, timeout=args.query_timeout)
   except dns.exception.Timeout:
     dbgLog(LOG_ERROR, "timed_query_v4: query timeout " + tld)
     return -1
@@ -317,13 +319,36 @@ if LOG_OUTPUT == 'file':
 dbgLog(LOG_DEBUG, "Begin Execution")
 random.seed()
 
-ROOT_SERVERS = parse_root_hints()
+# Set signal handles
+signal.signal(signal.SIGINT, death)
+signal.signal(signal.SIGTERM, death)
+signal.signal(signal.SIGABRT, death)
+signal.signal(signal.SIGALRM, death)
+signal.signal(signal.SIGSEGV, death)
+signal.signal(signal.SIGHUP, death)
+
+ap = argparse.ArgumentParser(description='Test root servers')
+ap.add_argument('-r', '--root-hints', type=str, action='store', default='named.cache',
+                  dest='root_hints', help='Alternative root hints file')
+ap.add_argument('-o', '--out-file', type=str, action='store', default='perf_root.out',
+                  dest='out_file', help='Filename for output')
+ap.add_argument('-v', '--verbose', action='count', default=0,
+                  dest='verbose', help='Verbose output, repeat for increased verbosity')
+ap.add_argument('-q', '--query-timeout', type=int, action='store', default=30,
+                  dest='query_timeout', help='DNS query timeout')
+ap.add_argument('-n', '--num-tlds', type=int, action='store', default=10,
+                  dest='num_tlds', help='Number of TLDs to test')
+ap.add_argument('-t', '--num-tests', type=int, action='store', default=2,
+                  dest='num_tests', help='Number of tests per-TLS')
+args = ap.parse_args()
+
+ROOT_SERVERS = parse_root_hints(args.root_hints)
 
 # This ranges from 'aa' to 'zz'
-tlds = find_tlds(chr(random.randint(97, 122)) + chr(random.randint(97, 122)), NUM_TLDS)
+tlds = find_tlds(chr(random.randint(97, 122)) + chr(random.randint(97, 122)), args.num_tlds)
 #print(find_tlds('uk', NUM_TLDS))
 
-for ii in range(1, NUM_TESTS + 1):
+for ii in range(1, args.num_tests + 1):
   dbgLog(LOG_DEBUG, "Begin test round " + str(ii))
   for rsi in ROOT_SERVERS:
     for tld in tlds:
