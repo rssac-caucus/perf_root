@@ -12,7 +12,7 @@ perf_root.py [-h] [-d DELAY] [-n NUM_TLDS] [-o OUT_FILE]
 show this help message and exit
 
 ``-d DELAY, --delay DELAY``
-Delay between tests in seconds (default: 0.5)
+Delay between tests in seconds (default: 0.2)
 
 ``-n NUM_TLDS, --num-tlds NUM_TLDS``
 Number of TLDs to test (default: 10)
@@ -21,7 +21,7 @@ Number of TLDs to test (default: 10)
 Filename for output (default: )
 
 ``-q QUERY_TIMEOUT, --query-timeout QUERY_TIMEOUT``
-DNS query timeout in seconds (default: 30)
+DNS query timeout in seconds (default: 10)
 
 ``-r ROOT_HINTS, --root-hints ROOT_HINTS``
 Root hints file (default: named.cache)
