@@ -1,6 +1,7 @@
 # Added by me
 *.swp
 *.run
+*.out
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
