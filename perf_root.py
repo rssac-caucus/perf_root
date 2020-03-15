@@ -223,7 +223,7 @@ def handle_walk_response(resp):
         dbgLog(LOG_DEBUG, "ns:" + ns)
         return ns, ns
 
-  else: # Need to handle SERVFAIL 
+  else: # Need to handle SERVFAIL
     dbgLog(LOG_WARN, "handle_walk_response unhandled response:" + str(resp))
 
   return None, None
@@ -237,7 +237,7 @@ def find_tlds(qstr, x):
   # The first time is special
   resp = send_walk_query(qstr)
   if not resp:
-    death("FATAL: First DNS query failed " + qstr)
+    death("First DNS query failed " + qstr)
 
   dn_down, dn_up = handle_walk_response(resp)
   if not dn_down or not dn_up:
@@ -396,9 +396,10 @@ tlds = find_tlds(chr(random.randint(97, 122)) + chr(random.randint(97, 122)), ar
 fancy_output("Found " + str(len(tlds)) + " TLDs")
 time.sleep(1)
 
+# Perform IPv4 tests
 for ii in range(1, args.num_tests + 1):
-  fancy_output("\rStarting test round " + str(ii))
-  dbgLog(LOG_DEBUG, "Starting test round " + str(ii))
+  fancy_output("\rStarting IPv4 test round " + str(ii))
+  dbgLog(LOG_DEBUG, "Starting IPv4 test round " + str(ii))
 
   time.sleep(1)
   for rsi in ROOT_SERVERS:
@@ -411,6 +412,8 @@ for ii in range(1, args.num_tests + 1):
       fancy_output("\r" + ROOT_SERVERS[rsi].name + " min:" + minimum + " max:" + maximum + " avg:" + mean)
       ROOT_SERVERS[rsi].add_time_v4(tld, timed_query_v4(tld, ROOT_SERVERS[rsi].ipv4))
       time.sleep(args.delay)
+
+# TODO: Write IPv6 testing
 
 fancy_output("\rFinished testing")
 print()
