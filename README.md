@@ -27,7 +27,7 @@ DNS query timeout in seconds (default: 30)
 Root hints file (default: named.cache)
 
 ``-t NUM_TESTS, --num-tests NUM_TESTS``
-Number of tests per-TLS (default: 2)
+Number of tests per-TLD (default: 2)
 
 ``-v, --verbose``
 Verbose output, repeat for increased verbosity
