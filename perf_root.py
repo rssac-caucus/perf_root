@@ -79,21 +79,17 @@ class RootServer:
 
   # Return list of all IPv4 testing times
   def get_times_v4(self):
-    #return [x.values() for x in list(self.times_v4.values())
     if len(self.times_v4) == 0:
-      return [0]
+      return [0.0]
     else:
-      rv = []
-      for ll in list(self.times_v4.values()):
-        rv += ll
-      return rv
+      return sum(list(self.times_v4.values()), [])
 
   # Return list of all IPv6 testing times
   def get_times_v6(self):
-    rv = []
-    for ll in list(self.times_v6.values()):
-      rv += ll
-    return rv
+    if len(self.times_v6) == 0:
+      return [0.0]
+    else:
+      return sum(list(self.times_v6.values()), [])
 
   # Convert this object to YAML and return it
   def to_json(self):
@@ -101,7 +97,6 @@ class RootServer:
     rv['rsi'] = self.name
     rv['ipv4'] = self.times_v4
     rv['ipv6'] = self.times_v6
-
     return json.dumps(rv)
 
 ####################
@@ -369,18 +364,18 @@ signal.signal(signal.SIGHUP, euthanize)
 ap = argparse.ArgumentParser(description = 'Test DNS Root Servers',
                                formatter_class = argparse.ArgumentDefaultsHelpFormatter,
                                epilog = 'If no --out-file is specified stdout is used.')
-ap.add_argument('-d', '--delay', type=float, action='store', default=0.5,
+ap.add_argument('-d', '--delay', type=float, action='store', default=0.2,
                   dest='delay', help='Delay between tests in seconds')
 ap.add_argument('-n', '--num-tlds', type=int, action='store', default=10,
                   dest='num_tlds', help='Number of TLDs to test')
 ap.add_argument('-o', '--out-file', type=str, action='store', default='',
                   dest='out_file', help='Filename for output')
-ap.add_argument('-q', '--query-timeout', type=int, action='store', default=30,
+ap.add_argument('-q', '--query-timeout', type=int, action='store', default=10,
                   dest='query_timeout', help='DNS query timeout in seconds')
 ap.add_argument('-r', '--root-hints', type=str, action='store', default='named.cache',
                   dest='root_hints', help='Root hints file')
 ap.add_argument('-t', '--num-tests', type=int, action='store', default=2,
-                  dest='num_tests', help='Number of tests per-TLS')
+                  dest='num_tests', help='Number of tests per-TLD')
 ap.add_argument('-v', '--verbose', action='count', default=0,
                   dest='verbose', help='Verbose output, repeat for increased verbosity')
 args = ap.parse_args()
