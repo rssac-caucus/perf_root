@@ -1,6 +1,5 @@
 When launched perf_root crawls the DNS root zone for a number of
-TLDs. Once found perf_root will query NS records for
-each of those TLDs over UDP, timing each query. Results of these tests
+TLDs. It then issues timed queries to each TLD over UDP. Results of these tests
 are then output in JSON.
 
 ## Usage
