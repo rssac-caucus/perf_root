@@ -54,7 +54,8 @@ LOG_SIZE = 1024 # Max logfile size in KB
 # Classes #
 ###########
 class RootServer:
-  def __init__(self):
+  def __init__(self, name):
+    self.name = name
     self.ipv4 = ''
     self.ipv6 = ''
     self.times_v4 = {}
@@ -78,6 +79,7 @@ class RootServer:
   # Convert this object to YAML and return it
   def to_json(self):
     rv = {}
+    rv['rsi'] = self.name
     rv['ipv4'] = self.times_v4
     rv['ipv6'] = self.times_v6
 
@@ -293,9 +295,9 @@ def parse_root_hints(root_hints):
   fn = open(root_hints, 'r')
   for line in fn:
     if line[0] != ';' and line[0] != '.':
-      rsi = line.split()[0].rstrip('.')
+      rsi = line.split()[0].rstrip('.').lower()
       if not rsi in rv:
-        rv[rsi] = RootServer()
+        rv[rsi] = RootServer(rsi)
 
       ip = ipaddress.ip_address(line.split()[3])
       if ip.version == 4:
@@ -375,7 +377,7 @@ for ii in range(1, args.num_tests + 1):
 
   time.sleep(1)
   for rsi in ROOT_SERVERS:
-    fancy_output("\rTesting " + rsi)
+    fancy_output("\rTesting " + ROOT_SERVERS[rsi].name)
     for tld in tlds:
       ROOT_SERVERS[rsi].add_time_v4(tld, timed_query_v4(tld, ROOT_SERVERS[rsi].ipv4))
 
@@ -383,6 +385,7 @@ fancy_output("\rFinished testing")
 
 for rsi in ROOT_SERVERS:
   print(ROOT_SERVERS[rsi].to_json())
+
 
 print()
 sys.exit(0)
