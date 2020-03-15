@@ -33,6 +33,7 @@ import os
 import random
 #import re
 import signal
+import statistics
 #import subprocess
 import sys
 import time
@@ -76,6 +77,24 @@ class RootServer:
     else:
       self.times_v6[tld].append(time)
 
+  # Return list of all IPv4 testing times
+  def get_times_v4(self):
+    #return [x.values() for x in list(self.times_v4.values())
+    if len(self.times_v4) == 0:
+      return [0]
+    else:
+      rv = []
+      for ll in list(self.times_v4.values()):
+        rv += ll
+      return rv
+
+  # Return list of all IPv6 testing times
+  def get_times_v6(self):
+    rv = []
+    for ll in list(self.times_v6.values()):
+      rv += ll
+    return rv
+
   # Convert this object to YAML and return it
   def to_json(self):
     rv = {}
@@ -83,17 +102,19 @@ class RootServer:
     rv['ipv4'] = self.times_v4
     rv['ipv6'] = self.times_v6
 
-    return json.dumps(rv) #+ "\n" + json.dumps(self.times_v6)
+    return json.dumps(rv)
 
 ####################
 # GLOBAL FUNCTIONS #
 ####################
 def euthanize(signal, frame):
-  print("SIG-" + str(signal) + " caught, exiting")
+  sys.stdout.write("\rSIG-" + str(signal) + " caught, exiting\n")
+  sys.stdout.flush()
   sys.exit(1)
 
 def death(errStr=''):
-  print("FATAL:" + errStr)
+  sys.stdout.write("\rFATAL:" + errStr + "\n")
+  sys.stdout.flush()
   sys.exit(1)
 
 # Logs message to LOG_FNAME or tty
@@ -135,7 +156,7 @@ def dbgLog(lvl, dbgStr):
 
 # Fancier output than normal debug logging
 def fancy_output(str):
-  window = 30
+  window = 70
 
   if LOG_LEVEL >= LOG_DEBUG:
     return
@@ -345,19 +366,23 @@ signal.signal(signal.SIGSEGV, euthanize)
 signal.signal(signal.SIGHUP, euthanize)
 
 # CLI options
-ap = argparse.ArgumentParser(description='Test DNS Root Servers', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-ap.add_argument('-v', '--verbose', action='count', default=0,
-                  dest='verbose', help='Verbose output, repeat for increased verbosity')
-ap.add_argument('-r', '--root-hints', type=str, action='store', default='named.cache',
-                  dest='root_hints', help='Root hints file')
-ap.add_argument('-o', '--out-file', type=str, action='store', default='perf_root.out',
+ap = argparse.ArgumentParser(description = 'Test DNS Root Servers',
+                               formatter_class = argparse.ArgumentDefaultsHelpFormatter,
+                               epilog = 'If no --out-file is specified stdout is used.')
+ap.add_argument('-d', '--delay', type=float, action='store', default=0.5,
+                  dest='delay', help='Delay between tests in seconds')
+ap.add_argument('-n', '--num-tlds', type=int, action='store', default=10,
+                  dest='num_tlds', help='Number of TLDs to test')
+ap.add_argument('-o', '--out-file', type=str, action='store', default='',
                   dest='out_file', help='Filename for output')
 ap.add_argument('-q', '--query-timeout', type=int, action='store', default=30,
                   dest='query_timeout', help='DNS query timeout in seconds')
-ap.add_argument('-n', '--num-tlds', type=int, action='store', default=10,
-                  dest='num_tlds', help='Number of TLDs to test')
+ap.add_argument('-r', '--root-hints', type=str, action='store', default='named.cache',
+                  dest='root_hints', help='Root hints file')
 ap.add_argument('-t', '--num-tests', type=int, action='store', default=2,
                   dest='num_tests', help='Number of tests per-TLS')
+ap.add_argument('-v', '--verbose', action='count', default=0,
+                  dest='verbose', help='Verbose output, repeat for increased verbosity')
 args = ap.parse_args()
 
 LOG_LEVEL = min(args.verbose, LOG_DEBUG)
@@ -377,15 +402,29 @@ for ii in range(1, args.num_tests + 1):
 
   time.sleep(1)
   for rsi in ROOT_SERVERS:
-    fancy_output("\rTesting " + ROOT_SERVERS[rsi].name)
     for tld in tlds:
+      sig_chars = 7
+      times_v4 = ROOT_SERVERS[rsi].get_times_v4()
+      mean = str(statistics.mean(times_v4))[:sig_chars]
+      minimum = str(min(times_v4))[:sig_chars]
+      maximum = str(max(times_v4))[:sig_chars]
+      fancy_output("\r" + ROOT_SERVERS[rsi].name + " min:" + minimum + " max:" + maximum + " avg:" + mean)
       ROOT_SERVERS[rsi].add_time_v4(tld, timed_query_v4(tld, ROOT_SERVERS[rsi].ipv4))
+      time.sleep(args.delay)
 
 fancy_output("\rFinished testing")
-
-for rsi in ROOT_SERVERS:
-  print(ROOT_SERVERS[rsi].to_json())
-
-
 print()
+
+# Create output and write it
+output = ''
+for rsi in ROOT_SERVERS:
+  output += ROOT_SERVERS[rsi].to_json()
+
+if len(args.out_file) > 0:
+  fh = open(args.out_file, 'w')
+  fh.write(output)
+  fh.close()
+else:
+  print(output)
+
 sys.exit(0)
