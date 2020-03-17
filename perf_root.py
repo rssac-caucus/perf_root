@@ -33,6 +33,7 @@ import os
 import random
 #import re
 import signal
+import socket
 import statistics
 #import subprocess
 import sys
@@ -77,8 +78,7 @@ class RootServer:
     else:
       self.times_v4[proto][tld].append(time)
 
-  # Currently broken
-  def add_time_v6(self, tld, time):
+  def add_time_v6(self, proto, tld, time):
     if not proto in self.times_v6:
       self.times_v6[proto] = {}
 
@@ -98,16 +98,19 @@ class RootServer:
       return rv
 
   # Return list of all IPv6 testing times
-  # Currently broken
   def get_times_v6(self):
     if len(self.times_v6) == 0:
       return [0.0]
     else:
-      return sum(list(self.times_v6.values()), [])
+      rv = []
+      for proto in self.times_v6:
+        rv += sum(list(self.times_v6[proto].values()), [])
+      return rv
 
   # Convert this object to JSON and return it
   def to_json(self):
     rv = {}
+#    rv['timestamp'] = int(time.time())
     rv['rsi'] = self.name
     rv['ipv4'] = self.times_v4
     rv['ipv6'] = self.times_v6
@@ -349,10 +352,10 @@ def timed_query(fn, tld, ip):
   try:
     fn(query, str(ip), timeout=args.query_timeout)
   except dns.exception.Timeout:
-    dbgLog(LOG_ERROR, "timed_query: timeout " + fn.__name__ + " " + tld + " ip:" + ip)
+    dbgLog(LOG_ERROR, "timed_query: timeout " + fn.__name__ + " " + tld + " ip:" + str(ip))
     return -1
   except dns.query.BadResponse:
-    dbgLog(LOG_ERROR, "timed_query: bad response " + fn.__name__ + " " + tld + " ip:" + ip)
+    dbgLog(LOG_ERROR, "timed_query: bad response " + fn.__name__ + " " + tld + " ip:" + str(ip))
     return -1
 
   dbgLog(LOG_DEBUG, "timed_query time: " + str(time.perf_counter() - start_time))
@@ -419,27 +422,37 @@ fancy_output("Found " + str(len(tlds)) + " TLDs")
 time.sleep(1)
 
 # Perform IPv4 tests
-for ii in range(1, args.num_tests + 1):
-  fancy_output("\rStarting IPv4 test round " + str(ii))
-  dbgLog(LOG_DEBUG, "Starting IPv4 test round " + str(ii))
+if not args.no_v4:
+  for ii in range(1, args.num_tests + 1):
+    fancy_output("\rStarting IPv4 test round " + str(ii))
+    dbgLog(LOG_DEBUG, "Starting IPv4 test round " + str(ii))
 
-  time.sleep(1)
-  for rsi in ROOT_SERVERS:
-    for tld in tlds:
-      times_v4 = ROOT_SERVERS[rsi].get_times_v4()
-      mean = str(statistics.mean(times_v4))[:SIG_CHARS]
-      minimum = str(min(times_v4))[:SIG_CHARS]
-      maximum = str(max(times_v4))[:SIG_CHARS]
-      fancy_output("\r" + ROOT_SERVERS[rsi].name + " min:" + minimum + " max:" + maximum + " avg:" + mean)
-      if not args.no_udp:
-        ROOT_SERVERS[rsi].add_time_v4('udp', tld, timed_query(dns.query.udp, tld, ROOT_SERVERS[rsi].ipv4))
-        time.sleep(args.delay)
-      if not args.no_tcp:
-        ROOT_SERVERS[rsi].add_time_v4('tcp', tld, timed_query(dns.query.tcp, tld, ROOT_SERVERS[rsi].ipv4))
-        time.sleep(args.delay)
+    time.sleep(1)
+    for rsi in ROOT_SERVERS:
+      for tld in tlds:
+        times_v4 = ROOT_SERVERS[rsi].get_times_v4()
+        mean = str(statistics.mean(times_v4))[:SIG_CHARS]
+        minimum = str(min(times_v4))[:SIG_CHARS]
+        maximum = str(max(times_v4))[:SIG_CHARS]
+        fancy_output("\rv4:" + ROOT_SERVERS[rsi].name + " min:" + minimum + " max:" + maximum + " avg:" + mean)
+        if not args.no_udp:
+          ROOT_SERVERS[rsi].add_time_v4('udp', tld, timed_query(dns.query.udp, tld, ROOT_SERVERS[rsi].ipv4))
+          time.sleep(args.delay)
+        if not args.no_tcp:
+          ROOT_SERVERS[rsi].add_time_v4('tcp', tld, timed_query(dns.query.tcp, tld, ROOT_SERVERS[rsi].ipv4))
+          time.sleep(args.delay)
 
 
 # TODO: Write IPv6 testing
+if not args.no_v6:
+  IPV6_SUPPORT = True
+  try:
+    s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+    s.connect( (str(ROOT_SERVERS[random.choice(list(ROOT_SERVERS))].ipv6), 53) )
+    s.close()
+  except:
+    dbgLog(LOG_INFO, "No local IPv6 configured")
+    IPV6_SUPPORT = False
 
 fancy_output("\rFinished testing")
 print()
