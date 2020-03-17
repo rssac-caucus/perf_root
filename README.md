@@ -31,6 +31,18 @@ Number of tests per-TLD (default: 2)
 
 ``-v, --verbose``
 Verbose output, repeat for increased verbosity
-                        (default: 0)
+
+``--no-tcp``
+Turn off TCP testing (default: False)
+
+``--no-udp``
+Turn off UDP testing (default: False)
+
+``--no-ipv4``
+Turn off IPv4 testing (default: False)
+
+``--no-ipv6``
+Turn off IPv6 testing (default: False)
+
 
 If no --out-file is specified stdout is used.

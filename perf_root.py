@@ -50,6 +50,7 @@ LOG_OUTPUT = 'tty' # 'tty' | 'file' | False
 LOG_FNAME = 'perf_root.log'
 LOG_SIZE = 1024 # Max logfile size in KB
 
+SIG_CHARS = 7 # How many significant characters to display values in fancy output
 
 ###########
 # Classes #
@@ -65,33 +66,46 @@ class RootServer:
   def __repr__(self):
     return "ipv4:" + str(self.ipv4) + " ipv6:" + str(self.ipv6) + " times_v4:" + repr(self.times_v4) + " times_v6:" + repr(self.times_v6)
 
-  def add_time_v4(self, tld, time):
-    if not tld in self.times_v4:
-      self.times_v4[tld] = [time]
-    else:
-      self.times_v4[tld].append(time)
+  # Add a testing time for IPv4
+  # Takes a protocol(udp/tcp), TLD and a time
+  def add_time_v4(self, proto, tld, time):
+    if not proto in self.times_v4:
+      self.times_v4[proto] = {}
 
-  def add_time_v6(self, tld, time):
-    if not tld in self.times_v6:
-      self.times_v6[tld] = [time]
+    if not tld in self.times_v4[proto]:
+      self.times_v4[proto][tld] = [time]
     else:
-      self.times_v6[tld].append(time)
+      self.times_v4[proto][tld].append(time)
+
+  # Currently broken
+  def add_time_v6(self, tld, time):
+    if not proto in self.times_v6:
+      self.times_v6[proto] = {}
+
+    if not tld in self.times_v6[proto]:
+      self.times_v6[proto][tld] = [time]
+    else:
+      self.times_v6[proto][tld].append(time)
 
   # Return list of all IPv4 testing times
   def get_times_v4(self):
     if len(self.times_v4) == 0:
       return [0.0]
     else:
-      return sum(list(self.times_v4.values()), [])
+      rv = []
+      for proto in self.times_v4:
+        rv += sum(list(self.times_v4[proto].values()), [])
+      return rv
 
   # Return list of all IPv6 testing times
+  # Currently broken
   def get_times_v6(self):
     if len(self.times_v6) == 0:
       return [0.0]
     else:
       return sum(list(self.times_v6.values()), [])
 
-  # Convert this object to YAML and return it
+  # Convert this object to JSON and return it
   def to_json(self):
     rv = {}
     rv['rsi'] = self.name
@@ -306,6 +320,7 @@ def dn_dec(dn):
       else:
         return dn[:-1] + chr(ord(dn[-1:]) - 1)
 
+# Parse the root-hints file and return a dict of RSIs
 def parse_root_hints(root_hints):
   rv = {}
   fn = open(root_hints, 'r')
@@ -324,22 +339,23 @@ def parse_root_hints(root_hints):
   fn.close()
   return rv
 
-# Time the query and response to a root server IPv4 address
-# Returns time in seconds as float for the query and -1 on failure
-def timed_query_v4(tld, ip):
+# Time the query and response to a root server IP address(v4/v6)
+# Takes a function for the type of query(TCP/UDP), a TLD to query, and an IP address
+# Returns time in seconds as float and -1 on failure
+def timed_query(fn, tld, ip):
   query = dns.message.make_query(tld, 'NS')
 
   start_time = time.perf_counter()
   try:
-    dns.query.udp(query, str(ip), ignore_unexpected=True, timeout=args.query_timeout)
+    fn(query, str(ip), timeout=args.query_timeout)
   except dns.exception.Timeout:
-    dbgLog(LOG_ERROR, "timed_query_v4: query timeout " + tld)
+    dbgLog(LOG_ERROR, "timed_query: timeout " + fn.__name__ + " " + tld + " ip:" + ip)
     return -1
   except dns.query.BadResponse:
-    dbgLog(LOG_ERROR, "timed_query_v4: bad response " + tld)
+    dbgLog(LOG_ERROR, "timed_query: bad response " + fn.__name__ + " " + tld + " ip:" + ip)
     return -1
 
-  dbgLog(LOG_DEBUG, "timed_query_v4 time: " + str(time.perf_counter() - start_time))
+  dbgLog(LOG_DEBUG, "timed_query time: " + str(time.perf_counter() - start_time))
   return time.perf_counter() - start_time
 
 ###################
@@ -364,7 +380,7 @@ signal.signal(signal.SIGHUP, euthanize)
 ap = argparse.ArgumentParser(description = 'Test DNS Root Servers',
                                formatter_class = argparse.ArgumentDefaultsHelpFormatter,
                                epilog = 'If no --out-file is specified stdout is used.')
-ap.add_argument('-d', '--delay', type=float, action='store', default=0.2,
+ap.add_argument('-d', '--delay', type=float, action='store', default=0.1,
                   dest='delay', help='Delay between tests in seconds')
 ap.add_argument('-n', '--num-tlds', type=int, action='store', default=10,
                   dest='num_tlds', help='Number of TLDs to test')
@@ -378,6 +394,17 @@ ap.add_argument('-t', '--num-tests', type=int, action='store', default=2,
                   dest='num_tests', help='Number of tests per-TLD')
 ap.add_argument('-v', '--verbose', action='count', default=0,
                   dest='verbose', help='Verbose output, repeat for increased verbosity')
+
+ap.add_argument('--no-tcp', action='store_true', default=False, # Toggle UDP/TCP testing off
+                  dest='no_tcp', help='Turn off TCP testing')
+ap.add_argument('--no-udp', action='store_true', default=False,
+                  dest='no_udp', help='Turn off UDP testing')
+
+ap.add_argument('--no-ipv4', action='store_true', default=False, # Toggle IPv4/IPv6 testing off
+                  dest='no_v4', help='Turn off IPv4 testing')
+ap.add_argument('--no-ipv6', action='store_true', default=False,
+                  dest='no_v6', help='Turn off IPv6 testing')
+
 args = ap.parse_args()
 
 LOG_LEVEL = min(args.verbose, LOG_DEBUG)
@@ -399,14 +426,18 @@ for ii in range(1, args.num_tests + 1):
   time.sleep(1)
   for rsi in ROOT_SERVERS:
     for tld in tlds:
-      sig_chars = 7
       times_v4 = ROOT_SERVERS[rsi].get_times_v4()
-      mean = str(statistics.mean(times_v4))[:sig_chars]
-      minimum = str(min(times_v4))[:sig_chars]
-      maximum = str(max(times_v4))[:sig_chars]
+      mean = str(statistics.mean(times_v4))[:SIG_CHARS]
+      minimum = str(min(times_v4))[:SIG_CHARS]
+      maximum = str(max(times_v4))[:SIG_CHARS]
       fancy_output("\r" + ROOT_SERVERS[rsi].name + " min:" + minimum + " max:" + maximum + " avg:" + mean)
-      ROOT_SERVERS[rsi].add_time_v4(tld, timed_query_v4(tld, ROOT_SERVERS[rsi].ipv4))
-      time.sleep(args.delay)
+      if not args.no_udp:
+        ROOT_SERVERS[rsi].add_time_v4('udp', tld, timed_query(dns.query.udp, tld, ROOT_SERVERS[rsi].ipv4))
+        time.sleep(args.delay)
+      if not args.no_tcp:
+        ROOT_SERVERS[rsi].add_time_v4('tcp', tld, timed_query(dns.query.tcp, tld, ROOT_SERVERS[rsi].ipv4))
+        time.sleep(args.delay)
+
 
 # TODO: Write IPv6 testing
 
