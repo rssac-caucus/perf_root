@@ -1,10 +1,12 @@
-When launched perf_root crawls the DNS root zone for a number of
-TLDs. It then issues timed queries to each TLD over UDP. Results of these tests
-are then output in JSON.
+When started perf_root crawls the DNS root zone for a number of
+TLDs. It then issues timed queries to each TLD over UDP and TCP, IPv4
+and IPv6.
+
+Results of these tests are then output in JSON.
 
 ## Usage
 ``
-usage: perf_root.py [-h] [-d DELAY] [-n NUM_TLDS] [-o OUT_FILE]
+perf_root.py [-h] [-d DELAY] [-n NUM_TLDS] [-o OUT_FILE]
                     [-q QUERY_TIMEOUT] [-r ROOT_HINTS] [-t NUM_TESTS] [-v]
                     [--no-tcp] [--no-udp] [--no-ipv4] [--no-ipv6]
 ``
@@ -47,3 +49,6 @@ Turn off IPv6 testing (default: False)
 
 
 If no --out-file is specified stdout is used.
+
+# Installation
+perf_root.py requires Python3 and the dnspython library.
