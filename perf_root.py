@@ -462,7 +462,6 @@ if not args.no_v4:
           ROOT_SERVERS[rsi].add_time_v4('tcp', tld, timed_query(dns.query.tcp, tld, ROOT_SERVERS[rsi].ipv4))
           time.sleep(args.delay)
 
-
 # Perform IPv6 tests
 if not args.no_v6 and IPV6_SUPPORT:
   for ii in range(1, args.num_tests + 1):

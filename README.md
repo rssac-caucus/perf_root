@@ -4,15 +4,16 @@ are then output in JSON.
 
 ## Usage
 ``
-perf_root.py [-h] [-d DELAY] [-n NUM_TLDS] [-o OUT_FILE]
+usage: perf_root.py [-h] [-d DELAY] [-n NUM_TLDS] [-o OUT_FILE]
                     [-q QUERY_TIMEOUT] [-r ROOT_HINTS] [-t NUM_TESTS] [-v]
+                    [--no-tcp] [--no-udp] [--no-ipv4] [--no-ipv6]
 ``
 
 ``-h, --help``
 show this help message and exit
 
 ``-d DELAY, --delay DELAY``
-Delay between tests in seconds (default: 0.2)
+Delay between tests in seconds (default: 0.05)
 
 ``-n NUM_TLDS, --num-tlds NUM_TLDS``
 Number of TLDs to test (default: 10)
