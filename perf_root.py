@@ -382,8 +382,8 @@ signal.signal(signal.SIGHUP, euthanize)
 # CLI options
 ap = argparse.ArgumentParser(description = 'Test DNS Root Servers',
                                formatter_class = argparse.ArgumentDefaultsHelpFormatter,
-                               epilog = 'If no --out-file is specified stdout is used.')
-ap.add_argument('-d', '--delay', type=float, action='store', default=0.1,
+                               epilog = 'If --out-file is not specified stdout is used.')
+ap.add_argument('-d', '--delay', type=float, action='store', default=0.05,
                   dest='delay', help='Delay between tests in seconds')
 ap.add_argument('-n', '--num-tlds', type=int, action='store', default=10,
                   dest='num_tlds', help='Number of TLDs to test')
@@ -412,11 +412,31 @@ args = ap.parse_args()
 
 LOG_LEVEL = min(args.verbose, LOG_DEBUG)
 dbgLog(LOG_DEBUG, "Begin Execution")
-random.seed()
+
+if args.no_v4 and args.no_v6:
+  death("Both IPv4 and IPv6 disabled")
+
+if args.no_udp and args.no_tcp:
+  death("Both TCP and UDP disabled")
 
 ROOT_SERVERS = parse_root_hints(args.root_hints)
 
+# Is IPv6 supported on this host?
+if not args.no_v6:
+  IPV6_SUPPORT = True
+  try:
+    s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+    s.connect( (str(ROOT_SERVERS[random.choice(list(ROOT_SERVERS))].ipv6), 53) )
+    s.close()
+  except:
+    dbgLog(LOG_INFO, "No local IPv6 configured")
+    IPV6_SUPPORT = False
+
+if args.no_v4 and not IPV6_SUPPORT:
+  death("IPv4 disabled and IPv6 not configured")
+
 # This ranges from 'aa' to 'zz'
+random.seed()
 tlds = find_tlds(chr(random.randint(97, 122)) + chr(random.randint(97, 122)), args.num_tlds)
 fancy_output("Found " + str(len(tlds)) + " TLDs")
 time.sleep(1)
@@ -426,8 +446,8 @@ if not args.no_v4:
   for ii in range(1, args.num_tests + 1):
     fancy_output("\rStarting IPv4 test round " + str(ii))
     dbgLog(LOG_DEBUG, "Starting IPv4 test round " + str(ii))
-
     time.sleep(1)
+
     for rsi in ROOT_SERVERS:
       for tld in tlds:
         times_v4 = ROOT_SERVERS[rsi].get_times_v4()
@@ -443,16 +463,26 @@ if not args.no_v4:
           time.sleep(args.delay)
 
 
-# TODO: Write IPv6 testing
-if not args.no_v6:
-  IPV6_SUPPORT = True
-  try:
-    s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-    s.connect( (str(ROOT_SERVERS[random.choice(list(ROOT_SERVERS))].ipv6), 53) )
-    s.close()
-  except:
-    dbgLog(LOG_INFO, "No local IPv6 configured")
-    IPV6_SUPPORT = False
+# Perform IPv6 tests
+if not args.no_v6 and IPV6_SUPPORT:
+  for ii in range(1, args.num_tests + 1):
+    fancy_output("\rStarting IPv6 test round " + str(ii))
+    dbgLog(LOG_DEBUG, "Starting IPv6 test round " + str(ii))
+    time.sleep(1)
+
+    for rsi in ROOT_SERVERS:
+      for tld in tlds:
+        times_v6 = ROOT_SERVERS[rsi].get_times_v6()
+        mean = str(statistics.mean(times_v6))[:SIG_CHARS]
+        minimum = str(min(times_v6))[:SIG_CHARS]
+        maximum = str(max(times_v6))[:SIG_CHARS]
+        fancy_output("\rv6:" + ROOT_SERVERS[rsi].name + " min:" + minimum + " max:" + maximum + " avg:" + mean)
+        if not args.no_udp:
+          ROOT_SERVERS[rsi].add_time_v6('udp', tld, timed_query(dns.query.udp, tld, ROOT_SERVERS[rsi].ipv6))
+          time.sleep(args.delay)
+        if not args.no_tcp:
+          ROOT_SERVERS[rsi].add_time_v6('tcp', tld, timed_query(dns.query.tcp, tld, ROOT_SERVERS[rsi].ipv6))
+          time.sleep(args.delay)
 
 fancy_output("\rFinished testing")
 print()
