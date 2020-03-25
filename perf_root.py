@@ -35,7 +35,7 @@ import random
 import signal
 import socket
 import statistics
-#import subprocess
+import subprocess
 import sys
 import time
 
@@ -51,7 +51,12 @@ LOG_OUTPUT = 'tty' # 'tty' | 'file' | False
 LOG_FNAME = 'perf_root.log'
 LOG_SIZE = 1024 # Max logfile size in KB
 
-SIG_CHARS = 7 # How many significant characters to display values in fancy output
+SIG_CHARS = 7 # How many significant characters to display in fancy output
+SYS_TYPE = '' # Enumerated type of system we're running on: linux, bsd, darwin, win32, cygwin
+TRACEROUTE_BIN_V4 = '' # Location of IPv4 traceroute binary
+TRACEROUTE_BIN_V6 = '' # Location of IPv6 traceroute binary
+TRACEROUTE_NUM_TIMEOUTS = 3 # Number of consequetive timed out traceroute probes we tolerate before giving up
+ROOT_SERVERS = None # Our list of DNS root servers
 
 ###########
 # Classes #
@@ -59,10 +64,12 @@ SIG_CHARS = 7 # How many significant characters to display values in fancy outpu
 class RootServer:
   def __init__(self, name):
     self.name = name
-    self.ipv4 = ''
-    self.ipv6 = ''
+    self.ipv4 = None
+    self.ipv6 = None
     self.times_v4 = {}
     self.times_v6 = {}
+    self.traceroute_v4 = []
+    self.traceroute_v6 = []
 
   def __repr__(self):
     return "ipv4:" + str(self.ipv4) + " ipv6:" + str(self.ipv6) + " times_v4:" + repr(self.times_v4) + " times_v6:" + repr(self.times_v6)
@@ -78,6 +85,8 @@ class RootServer:
     else:
       self.times_v4[proto][tld].append(time)
 
+  # Add a testing time for IPv6
+  # Takes a protocol(udp/tcp), TLD and a time
   def add_time_v6(self, proto, tld, time):
     if not proto in self.times_v6:
       self.times_v6[proto] = {}
@@ -110,11 +119,73 @@ class RootServer:
   # Convert this object to JSON and return it
   def to_json(self):
     rv = {}
-#    rv['timestamp'] = int(time.time())
     rv['rsi'] = self.name
     rv['ipv4'] = self.times_v4
     rv['ipv6'] = self.times_v6
+    rv['traceroute_v4'] = self.traceroute_v4
+    rv['traceroute_v6'] = self.traceroute_v6
     return json.dumps(rv)
+
+  # Perform IPv4 traceroute and store results
+  def trace_route_v4(self): # Only tested with Linux thus far
+
+    # Parses each line returned from traceroute cmd
+    # Takes a line
+    # Returns list of gateways returning probes
+    # Returns None if no probes sent
+    # Returns empty list if no probes received
+    def parse_line(line): 
+      gateways = []
+      for token in line.strip().split()[1:]:
+        try:
+          gw = ipaddress.IPv4Address(token)
+          if gw == self.ipv4:
+            return None
+          gateways.append(token)
+        except ipaddress.AddressValueError:
+          continue
+      return gateways
+
+    cmd = TRACEROUTE_BIN_V4 + " -n " + str(self.ipv4)
+    dbgLog(LOG_DEBUG, cmd)
+    try:
+      proc = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, universal_newlines=True)
+
+      # Keep reading lines until we run out or reach TRACEROUTE_NUM_TIMEOUTS
+      timeouts = 0
+      while True:
+        line = proc.stdout.readline()
+        if not line:
+          break
+
+        gateways = parse_line(line)
+        if isinstance(gateways, list):
+          dbgLog(LOG_DEBUG, "gateways:" + repr(gateways))
+          if len(gateways) == 0:
+            timeouts += 1
+          else:
+            timeouts = 0
+
+          # Have we reached our max allowed timeouts?
+          if timeouts == TRACEROUTE_NUM_TIMEOUTS:
+            self.traceroute_v4 = self.traceroute_v4[:-TRACEROUTE_NUM_TIMEOUTS]
+            break
+          else:
+            self.traceroute_v4.append(gateways)
+
+
+      dbgLog(LOG_DEBUG, "traceroute_v4:" + repr(self.traceroute_v4))
+    except subprocess.TimeoutExpired as e:
+      dbgLog(LOG_ERROR, "trace_route_v4 subprocess TimeoutExpired" + str(e))
+      return
+    except subprocess.CalledProcessError as e:
+      dbgLog(LOG_ERROR, "trace_route_v4 subprocess CallProcessError" + str(e))
+      return
+
+  # Perform IPv6 traceroute and store results
+  def trace_route_v6(self):
+    time.sleep(0.5)
+    pass
 
 ####################
 # GLOBAL FUNCTIONS #
@@ -323,6 +394,25 @@ def dn_dec(dn):
       else:
         return dn[:-1] + chr(ord(dn[-1:]) - 1)
 
+# Time the query and response to a root server IP address(v4/v6)
+# Takes a function for the type of query(TCP/UDP), a TLD to query, and an IP address
+# Returns time in seconds as float and -1 on failure
+def timed_query(fn, tld, ip):
+  query = dns.message.make_query(tld, 'NS')
+
+  start_time = time.perf_counter()
+  try:
+    fn(query, str(ip), timeout=args.query_timeout)
+  except dns.exception.Timeout:
+    dbgLog(LOG_ERROR, "timed_query: timeout " + fn.__name__ + " " + tld + " ip:" + str(ip))
+    return -1
+  except dns.query.BadResponse:
+    dbgLog(LOG_ERROR, "timed_query: bad response " + fn.__name__ + " " + tld + " ip:" + str(ip))
+    return -1
+
+  dbgLog(LOG_DEBUG, "timed_query time: " + str(time.perf_counter() - start_time))
+  return time.perf_counter() - start_time
+
 # Parse the root-hints file and return a dict of RSIs
 def parse_root_hints(root_hints):
   rv = {}
@@ -342,24 +432,48 @@ def parse_root_hints(root_hints):
   fn.close()
   return rv
 
-# Time the query and response to a root server IP address(v4/v6)
-# Takes a function for the type of query(TCP/UDP), a TLD to query, and an IP address
-# Returns time in seconds as float and -1 on failure
-def timed_query(fn, tld, ip):
-  query = dns.message.make_query(tld, 'NS')
+# Returns the type of system we are running on
+# Returns either: linux, bsd, darwin, win32, cygwin
+def get_sys_type():
+  if sys.platform.lower().startswith('freebsd'):
+    return 'bsd'
+  elif sys.platform.lower().startswith('netbsd'):
+    return 'bsd'
+  elif sys.platform.lower().startswith('openbsd'):
+    return 'bsd'
+  elif sys.platform.lower().startswith('linux'):
+    return 'linux'
+  elif sys.platform.lower().startswith('darwin'):
+    return 'darwin'
+  elif sys.platform.lower().startswith('win32'):
+    death('Unsupported platform win32')
+    #return 'win32'
+  elif sys.platform.lower().startswith('cygwin'):
+    death('Unsupported platform cygwin')
+    #return 'cygwin'
 
-  start_time = time.perf_counter()
-  try:
-    fn(query, str(ip), timeout=args.query_timeout)
-  except dns.exception.Timeout:
-    dbgLog(LOG_ERROR, "timed_query: timeout " + fn.__name__ + " " + tld + " ip:" + str(ip))
-    return -1
-  except dns.query.BadResponse:
-    dbgLog(LOG_ERROR, "timed_query: bad response " + fn.__name__ + " " + tld + " ip:" + str(ip))
-    return -1
+# Returns the location of an executable binary
+# Returns None if binary cannot be found
+# Must be called after SYS_TYPE is set
+def find_binary(fn):
+  def test(path): # Returns true if passed file exists and is executable by current user
+    if os.path.exists(path):
+      if os.access(path, os.X_OK):
+        return True
+    return False
 
-  dbgLog(LOG_DEBUG, "timed_query time: " + str(time.perf_counter() - start_time))
-  return time.perf_counter() - start_time
+  if SYS_TYPE == 'bsd' or SYS_TYPE == 'linux' or SYS_TYPE == 'darwin':
+    for directory in ['/usr/bin/', '/usr/sbin/', '/bin/', '/sbin/', '/usr/local/bin/', '/usr/local/sbin/']:
+      if test(directory + fn):
+        return directory + fn
+    return None
+
+  elif SYS_TYPE == 'win32':
+    death('Unsupported platform win32')
+
+  elif SYS_TYPE == 'cygwin':
+    death('Unsupported platform cygwin')
+
 
 ###################
 # BEGIN EXECUTION #
@@ -408,6 +522,9 @@ ap.add_argument('--no-ipv4', action='store_true', default=False, # Toggle IPv4/I
 ap.add_argument('--no-ipv6', action='store_true', default=False,
                   dest='no_v6', help='Turn off IPv6 testing')
 
+ap.add_argument('--no-traceroute', action='store_true', default=False,
+                  dest='no_traceroute', help='Turn off IPv4 and IPv6 traceroute')
+
 args = ap.parse_args()
 
 LOG_LEVEL = min(args.verbose, LOG_DEBUG)
@@ -419,7 +536,9 @@ if args.no_v4 and args.no_v6:
 if args.no_udp and args.no_tcp:
   death("Both TCP and UDP disabled")
 
-ROOT_SERVERS = parse_root_hints(args.root_hints)
+SYS_TYPE = get_sys_type() # Determine what the OS is
+dbgLog(LOG_DEBUG, "SYS_TYPE:" + SYS_TYPE)
+ROOT_SERVERS = parse_root_hints(args.root_hints) # Get our root servers
 
 # Is IPv6 supported on this host?
 if not args.no_v6:
@@ -435,14 +554,24 @@ if not args.no_v6:
 if args.no_v4 and not IPV6_SUPPORT:
   death("IPv4 disabled and IPv6 not configured")
 
-# This ranges from 'aa' to 'zz'
 random.seed()
+# This ranges from 'aa' to 'zz'
 tlds = find_tlds(chr(random.randint(97, 122)) + chr(random.randint(97, 122)), args.num_tlds)
 fancy_output("Found " + str(len(tlds)) + " TLDs")
 time.sleep(1)
 
 # Perform IPv4 tests
 if not args.no_v4:
+
+  if not args.no_traceroute:
+    # Traceroutes
+    TRACEROUTE_BIN_V4 = find_binary('traceroute')
+    dbgLog(LOG_DEBUG, "traceroute_bin_v4:" + TRACEROUTE_BIN_V4)
+    for rsi in ROOT_SERVERS:
+      fancy_output("\rPerforming traceroute to " + rsi)
+      ROOT_SERVERS[rsi].trace_route_v4()
+
+  # DNS tests
   for ii in range(1, args.num_tests + 1):
     fancy_output("\rStarting IPv4 test round " + str(ii))
     dbgLog(LOG_DEBUG, "Starting IPv4 test round " + str(ii))
@@ -464,6 +593,16 @@ if not args.no_v4:
 
 # Perform IPv6 tests
 if not args.no_v6 and IPV6_SUPPORT:
+
+  if not args.no_traceroute:
+    # Traceroutes
+    TRACEROUTE_BIN_V6 = find_binary('traceroute6')
+    dbgLog(LOG_DEBUG, "traceroute_bin_v6:" + TRACEROUTE_BIN_V6)
+    for rsi in ROOT_SERVERS:
+      fancy_output("\rPerforming traceroute to " + rsi)
+      ROOT_SERVERS[rsi].trace_route_v6()
+
+  # DNS tests
   for ii in range(1, args.num_tests + 1):
     fancy_output("\rStarting IPv6 test round " + str(ii))
     dbgLog(LOG_DEBUG, "Starting IPv6 test round " + str(ii))
@@ -492,9 +631,12 @@ for rsi in ROOT_SERVERS:
   output += ROOT_SERVERS[rsi].to_json()
 
 if len(args.out_file) > 0:
-  fh = open(args.out_file, 'w')
-  fh.write(output)
-  fh.close()
+  try:
+    fh = open(args.out_file, 'w')
+    fh.write(output)
+    fh.close()
+  except:
+    death("Unable to write to " + args.out_file)
 else:
   print(output)
 
