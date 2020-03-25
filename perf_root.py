@@ -149,7 +149,7 @@ class RootServer:
     cmd = TRACEROUTE_BIN_V4 + " -n " + str(self.ipv4)
     dbgLog(LOG_DEBUG, cmd)
     try:
-      proc = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, universal_newlines=True)
+      proc = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
 
       # Keep reading lines until we run out or reach TRACEROUTE_NUM_TIMEOUTS
       timeouts = 0
