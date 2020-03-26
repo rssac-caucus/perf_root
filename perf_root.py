@@ -241,7 +241,8 @@ def dbgLog(lvl, dbgStr):
 def fancy_output(str):
   window = 70
 
-  if LOG_LEVEL >= LOG_DEBUG:
+  # Only triggers on WARN and INFO log levels
+  if LOG_LEVEL >= LOG_DEBUG or LOG_LEVEL <= LOG_ERROR:
     return
 
   if len(str) > window:
