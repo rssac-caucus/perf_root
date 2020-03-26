@@ -37,6 +37,7 @@ import socket
 import statistics
 import subprocess
 import sys
+#import threading
 import time
 
 ###########
@@ -61,7 +62,7 @@ ROOT_SERVERS = None # Our list of DNS root servers
 ###########
 # Classes #
 ###########
-class RootServer:
+class RootServer():
   def __init__(self, name):
     self.name = name
     self.ipv4 = None
@@ -238,22 +239,24 @@ def dbgLog(lvl, dbgStr):
     print(outStr)
 
 # Fancier output than normal debug logging
-def fancy_output(str):
+# Takes a delay in seconds to wait after string(ss) is printed
+def fancy_output(delay, ss):
   window = 70
 
   # Only triggers on WARN and INFO log levels
   if LOG_LEVEL >= LOG_DEBUG or LOG_LEVEL <= LOG_ERROR:
     return
 
-  if len(str) > window:
+  if len(ss) > window:
     dbgLog(LOG_ERROR, "fancy_output: print window exceeded")
     return
 
-  sys.stdout.write(str)
-  for ii in range(window - len(str)):
+  sys.stdout.write(ss)
+  for ii in range(window - len(ss)):
     sys.stdout.write(' ')
 
   sys.stdout.flush()
+  time.sleep(delay)
 
 # Send a single walk query and return a dnspython response message
 def send_walk_query(qstr):
@@ -558,8 +561,7 @@ if args.no_v4 and not IPV6_SUPPORT:
 random.seed()
 # This ranges from 'aa' to 'zz'
 tlds = find_tlds(chr(random.randint(97, 122)) + chr(random.randint(97, 122)), args.num_tlds)
-fancy_output("Found " + str(len(tlds)) + " TLDs")
-time.sleep(1)
+fancy_output(1, "Found " + str(len(tlds)) + " TLDs")
 
 # Perform IPv4 tests
 if not args.no_v4:
@@ -569,14 +571,13 @@ if not args.no_v4:
     TRACEROUTE_BIN_V4 = find_binary('traceroute')
     dbgLog(LOG_DEBUG, "traceroute_bin_v4:" + TRACEROUTE_BIN_V4)
     for rsi in ROOT_SERVERS:
-      fancy_output("\rPerforming traceroute to " + rsi)
+      fancy_output(0, "\rPerforming traceroute to " + rsi)
       ROOT_SERVERS[rsi].trace_route_v4()
 
   # DNS tests
   for ii in range(1, args.num_tests + 1):
-    fancy_output("\rStarting IPv4 test round " + str(ii))
+    fancy_output(1, "\rStarting IPv4 test round " + str(ii))
     dbgLog(LOG_DEBUG, "Starting IPv4 test round " + str(ii))
-    time.sleep(1)
 
     for rsi in ROOT_SERVERS:
       for tld in tlds:
@@ -584,7 +585,7 @@ if not args.no_v4:
         mean = str(statistics.mean(times_v4))[:SIG_CHARS]
         minimum = str(min(times_v4))[:SIG_CHARS]
         maximum = str(max(times_v4))[:SIG_CHARS]
-        fancy_output("\rv4:" + ROOT_SERVERS[rsi].name + " min:" + minimum + " max:" + maximum + " avg:" + mean)
+        fancy_output(0, "\rv4:" + ROOT_SERVERS[rsi].name + " min:" + minimum + " max:" + maximum + " avg:" + mean)
         if not args.no_udp:
           ROOT_SERVERS[rsi].add_time_v4('udp', tld, timed_query(dns.query.udp, tld, ROOT_SERVERS[rsi].ipv4))
           time.sleep(args.delay)
@@ -600,14 +601,13 @@ if not args.no_v6 and IPV6_SUPPORT:
     TRACEROUTE_BIN_V6 = find_binary('traceroute6')
     dbgLog(LOG_DEBUG, "traceroute_bin_v6:" + TRACEROUTE_BIN_V6)
     for rsi in ROOT_SERVERS:
-      fancy_output("\rPerforming traceroute to " + rsi)
+      fancy_output(0, "\rPerforming traceroute to " + rsi)
       ROOT_SERVERS[rsi].trace_route_v6()
 
   # DNS tests
   for ii in range(1, args.num_tests + 1):
-    fancy_output("\rStarting IPv6 test round " + str(ii))
+    fancy_output(1, "\rStarting IPv6 test round " + str(ii))
     dbgLog(LOG_DEBUG, "Starting IPv6 test round " + str(ii))
-    time.sleep(1)
 
     for rsi in ROOT_SERVERS:
       for tld in tlds:
@@ -615,7 +615,7 @@ if not args.no_v6 and IPV6_SUPPORT:
         mean = str(statistics.mean(times_v6))[:SIG_CHARS]
         minimum = str(min(times_v6))[:SIG_CHARS]
         maximum = str(max(times_v6))[:SIG_CHARS]
-        fancy_output("\rv6:" + ROOT_SERVERS[rsi].name + " min:" + minimum + " max:" + maximum + " avg:" + mean)
+        fancy_output(0, "\rv6:" + ROOT_SERVERS[rsi].name + " min:" + minimum + " max:" + maximum + " avg:" + mean)
         if not args.no_udp:
           ROOT_SERVERS[rsi].add_time_v6('udp', tld, timed_query(dns.query.udp, tld, ROOT_SERVERS[rsi].ipv6))
           time.sleep(args.delay)
@@ -623,7 +623,7 @@ if not args.no_v6 and IPV6_SUPPORT:
           ROOT_SERVERS[rsi].add_time_v6('tcp', tld, timed_query(dns.query.tcp, tld, ROOT_SERVERS[rsi].ipv6))
           time.sleep(args.delay)
 
-fancy_output("\rFinished testing")
+fancy_output(0, "\rFinished testing")
 print()
 
 # Create output and write it
