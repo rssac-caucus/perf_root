@@ -54,8 +54,6 @@ LOG_SIZE = 1024 # Max logfile size in KB
 
 SIG_CHARS = 7 # How many significant characters to display in fancy output
 SYS_TYPE = '' # Enumerated type of system we're running on: linux, bsd, darwin, win32, cygwin
-TRACEROUTE_BIN_V4 = '' # Location of IPv4 traceroute binary
-TRACEROUTE_BIN_V6 = '' # Location of IPv6 traceroute binary
 TRACEROUTE_NUM_TIMEOUTS = 3 # Number of consequetive timed out traceroute probes we tolerate before giving up
 ROOT_SERVERS = None # Our list of DNS root servers
 
@@ -126,71 +124,6 @@ class RootServer():
     rv['traceroute_v4'] = self.traceroute_v4
     rv['traceroute_v6'] = self.traceroute_v6
     return json.dumps(rv)
-
-  # Perform IPv4 traceroute and store results
-  def trace_route_v4(self): # Only tested with Linux thus far
-
-    # Parses each line returned from traceroute cmd
-    # Takes a line
-    # Returns list of gateways returning probes
-    # Returns None if no probes sent
-    # Returns empty list if no probes received
-    def parse_line(line): 
-      gateways = []
-      for token in line.strip().split()[1:]:
-        try:
-          gw = ipaddress.IPv4Address(token)
-          if gw == self.ipv4:
-            return None
-          gateways.append(token)
-        except ipaddress.AddressValueError:
-          continue
-      return gateways
-
-    cmd = TRACEROUTE_BIN_V4 + " -n " + str(self.ipv4)
-    dbgLog(LOG_DEBUG, cmd)
-    try:
-      proc = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
-
-      # Keep reading lines until we run out or reach TRACEROUTE_NUM_TIMEOUTS
-      timeouts = 0
-      while True:
-        line = proc.stdout.readline()
-        if not line:
-          if proc.poll() == None:
-            proc.terminate()
-          break
-
-        gateways = parse_line(line)
-        if isinstance(gateways, list):
-          dbgLog(LOG_DEBUG, "gateways:" + repr(gateways))
-          if len(gateways) == 0:
-            timeouts += 1
-          else:
-            timeouts = 0
-
-          # Have we reached our max allowed timeouts?
-          if timeouts == TRACEROUTE_NUM_TIMEOUTS:
-            self.traceroute_v4 = self.traceroute_v4[:-TRACEROUTE_NUM_TIMEOUTS]
-            if proc.poll() == None:
-              proc.terminate()
-            break
-          else:
-            self.traceroute_v4.append(gateways)
-
-
-      dbgLog(LOG_DEBUG, "traceroute_v4:" + repr(self.traceroute_v4))
-    except subprocess.TimeoutExpired as e:
-      dbgLog(LOG_ERROR, "trace_route_v4 subprocess TimeoutExpired" + str(e))
-      return
-    except subprocess.CalledProcessError as e:
-      dbgLog(LOG_ERROR, "trace_route_v4 subprocess CallProcessError" + str(e))
-      return
-
-  # Perform IPv6 traceroute and store results
-  def trace_route_v6(self):
-    time.sleep(0.5)
-    pass
 
 ####################
 # GLOBAL FUNCTIONS #
@@ -421,6 +354,66 @@ def timed_query(fn, tld, ip):
   dbgLog(LOG_DEBUG, "timed_query time: " + str(time.perf_counter() - start_time))
   return time.perf_counter() - start_time
 
+# Perform a traceroute
+# Takes a traceroute binary location(type:string) and an IP address(type:ipaddress)
+# Returns list of lists of gateways(type:string)
+def trace_route(binary, ip): # Only tested with Linux thus far
+
+  # Parses each line returned from traceroute cmd
+  # Takes a line
+  # Returns list of gateways returning probes
+  # Returns None if no probes sent
+  # Returns empty list if no probes received
+  def parse_line(line): 
+    gateways = []
+    for token in line.strip().split()[1:]:
+      try:
+        gw = ipaddress.ip_address(token)
+        if gw == ip:
+          return None
+        gateways.append(token)
+      except ValueError:
+        continue
+    return gateways
+
+  cmd = binary + " -n " + str(ip)
+  dbgLog(LOG_DEBUG, cmd)
+  try:
+    proc = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+
+    # Keep reading lines until we run out or reach TRACEROUTE_NUM_TIMEOUTS
+    rv = []
+    timeouts = 0
+    while True:
+      line = proc.stdout.readline()
+      if not line:
+        if proc.poll() == None:
+          proc.terminate()
+        return rv
+
+      gateways = parse_line(line)
+      if isinstance(gateways, list):
+        dbgLog(LOG_DEBUG, "gateways:" + repr(gateways))
+        if len(gateways) == 0:
+          timeouts += 1
+        else:
+          timeouts = 0
+
+        # Have we reached our max allowed timeouts?
+        if timeouts == TRACEROUTE_NUM_TIMEOUTS:
+          if proc.poll() == None:
+            proc.terminate()
+          return rv[:-TRACEROUTE_NUM_TIMEOUTS]
+        else:
+          rv.append(gateways)
+
+  except subprocess.TimeoutExpired as e:
+    dbgLog(LOG_ERROR, "trace_route subprocess TimeoutExpired" + str(e))
+    raise
+  except subprocess.CalledProcessError as e:
+    dbgLog(LOG_ERROR, "trace_route subprocess CallProcessError" + str(e))
+    raise
+
 # Parse the root-hints file and return a dict of RSIs
 def parse_root_hints(root_hints):
   rv = {}
@@ -473,6 +466,7 @@ def find_binary(fn):
   if SYS_TYPE == 'bsd' or SYS_TYPE == 'linux' or SYS_TYPE == 'darwin':
     for directory in ['/usr/bin/', '/usr/sbin/', '/bin/', '/sbin/', '/usr/local/bin/', '/usr/local/sbin/']:
       if test(directory + fn):
+        dbgLog(LOG_DEBUG, "Found " + directory + fn)
         return directory + fn
     return None
 
@@ -571,12 +565,9 @@ fancy_output(1, "Found " + str(len(tlds)) + " TLDs")
 if not args.no_v4:
 
   if not args.no_traceroute:
-    # Traceroutes
-    TRACEROUTE_BIN_V4 = find_binary('traceroute')
-    dbgLog(LOG_DEBUG, "traceroute_bin_v4:" + TRACEROUTE_BIN_V4)
     for rsi in ROOT_SERVERS:
       fancy_output(0, "\rPerforming traceroute to " + rsi)
-      ROOT_SERVERS[rsi].trace_route_v4()
+      ROOT_SERVERS[rsi].traceroute_v4 = trace_route(find_binary('traceroute'), ROOT_SERVERS[rsi].ipv4)
 
   # DNS tests
   for ii in range(1, args.num_tests + 1):
@@ -601,12 +592,9 @@ if not args.no_v4:
 if not args.no_v6 and IPV6_SUPPORT:
 
   if not args.no_traceroute:
-    # Traceroutes
-    TRACEROUTE_BIN_V6 = find_binary('traceroute6')
-    dbgLog(LOG_DEBUG, "traceroute_bin_v6:" + TRACEROUTE_BIN_V6)
     for rsi in ROOT_SERVERS:
-      fancy_output(0, "\rPerforming traceroute to " + rsi)
-      ROOT_SERVERS[rsi].trace_route_v6()
+      fancy_output(0, "\rPerforming traceroute6 to " + rsi)
+      ROOT_SERVERS[rsi].traceroute_v6 = trace_route(find_binary('traceroute6'), ROOT_SERVERS[rsi].ipv6)
 
   # DNS tests
   for ii in range(1, args.num_tests + 1):
