@@ -30,6 +30,7 @@ import dns.query
 import ipaddress
 import json
 import os
+#from multiprocessing.pool import ThreadPool
 import random
 #import re
 import signal
@@ -37,7 +38,6 @@ import socket
 import statistics
 import subprocess
 import sys
-#import threading
 import time
 
 ###########
@@ -157,6 +157,8 @@ class RootServer():
       while True:
         line = proc.stdout.readline()
         if not line:
+          if proc.poll() == None:
+            proc.terminate()
           break
 
         gateways = parse_line(line)
@@ -170,6 +172,8 @@ class RootServer():
           # Have we reached our max allowed timeouts?
           if timeouts == TRACEROUTE_NUM_TIMEOUTS:
             self.traceroute_v4 = self.traceroute_v4[:-TRACEROUTE_NUM_TIMEOUTS]
+            if proc.poll() == None:
+              proc.terminate()
             break
           else:
             self.traceroute_v4.append(gateways)
