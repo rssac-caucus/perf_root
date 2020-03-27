@@ -30,7 +30,7 @@ import dns.query
 import ipaddress
 import json
 import os
-#from multiprocessing.pool import ThreadPool
+from multiprocessing.pool import ThreadPool
 import random
 #import re
 import signal
@@ -54,7 +54,7 @@ LOG_SIZE = 1024 # Max logfile size in KB
 
 SIG_CHARS = 7 # How many significant characters to display in fancy output
 SYS_TYPE = '' # Enumerated type of system we're running on: linux, bsd, darwin, win32, cygwin
-TRACEROUTE_NUM_TIMEOUTS = 3 # Number of consequetive timed out traceroute probes we tolerate before giving up
+TRACEROUTE_NUM_TIMEOUTS = 5 # Number of consecutive timed out traceroute probes we tolerate before giving up
 ROOT_SERVERS = None # Our list of DNS root servers
 
 ###########
@@ -299,6 +299,7 @@ def find_tlds(qstr, x):
       resp = send_walk_query(dn_up)
       if resp == None:
         dbgLog(LOG_WARN, "find_tlds walk_up query failed for " + qstr)
+        # TODO: Need to handle this better, shound NOT call handle_walk_respose if this is TRUE
       _, dn_up = handle_walk_response(resp)
       if dn_up == None:
         dbgLog(LOG_WARN, "find_tlds finished walking up")
@@ -368,18 +369,21 @@ def trace_route(binary, ip): # Only tested with Linux thus far
     gateways = []
     for token in line.strip().split()[1:]:
       try:
-        gw = ipaddress.ip_address(token)
-        if gw == ip:
+        if token == 'to': # Don't match the first line
           return None
+        gw = ipaddress.ip_address(token)
         gateways.append(token)
       except ValueError:
         continue
     return gateways
 
+  # Delay start time to prevent packet drops at first gateway
+  time.sleep(random.randint(0, int(len(ROOT_SERVERS) / 3)) * 2)
+
   cmd = binary + " -n " + str(ip)
-  dbgLog(LOG_DEBUG, cmd)
+  dbgLog(LOG_DEBUG, "trace_route:" + cmd)
   try:
-    proc = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    proc = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True)
 
     # Keep reading lines until we run out or reach TRACEROUTE_NUM_TIMEOUTS
     rv = []
@@ -393,7 +397,6 @@ def trace_route(binary, ip): # Only tested with Linux thus far
 
       gateways = parse_line(line)
       if isinstance(gateways, list):
-        dbgLog(LOG_DEBUG, "gateways:" + repr(gateways))
         if len(gateways) == 0:
           timeouts += 1
         else:
@@ -403,7 +406,7 @@ def trace_route(binary, ip): # Only tested with Linux thus far
         if timeouts == TRACEROUTE_NUM_TIMEOUTS:
           if proc.poll() == None:
             proc.terminate()
-          return rv[:-TRACEROUTE_NUM_TIMEOUTS]
+          return rv[:-TRACEROUTE_NUM_TIMEOUTS + 1]
         else:
           rv.append(gateways)
 
@@ -413,6 +416,15 @@ def trace_route(binary, ip): # Only tested with Linux thus far
   except subprocess.CalledProcessError as e:
     dbgLog(LOG_ERROR, "trace_route subprocess CallProcessError" + str(e))
     raise
+
+# IPv4 wrapper for trace_route()
+def trace_route_v4(ip):
+  return trace_route(find_binary('traceroute'), ip)
+
+# IPv6 wrapper for trace_route()
+def trace_route_v6(ip):
+  time.sleep(random.randint(0, int(len(ROOT_SERVERS) / 3)) * 2)
+  return trace_route(find_binary('traceroute6'), ip)
 
 # Parse the root-hints file and return a dict of RSIs
 def parse_root_hints(root_hints):
@@ -466,7 +478,7 @@ def find_binary(fn):
   if SYS_TYPE == 'bsd' or SYS_TYPE == 'linux' or SYS_TYPE == 'darwin':
     for directory in ['/usr/bin/', '/usr/sbin/', '/bin/', '/sbin/', '/usr/local/bin/', '/usr/local/sbin/']:
       if test(directory + fn):
-        dbgLog(LOG_DEBUG, "Found " + directory + fn)
+        #dbgLog(LOG_DEBUG, "Found " + directory + fn)
         return directory + fn
     return None
 
@@ -563,11 +575,13 @@ fancy_output(1, "Found " + str(len(tlds)) + " TLDs")
 
 # Perform IPv4 tests
 if not args.no_v4:
-
   if not args.no_traceroute:
-    for rsi in ROOT_SERVERS:
-      fancy_output(0, "\rPerforming traceroute to " + rsi)
-      ROOT_SERVERS[rsi].traceroute_v4 = trace_route(find_binary('traceroute'), ROOT_SERVERS[rsi].ipv4)
+    fancy_output(0, "\rStarting traceroute tests")
+    pool = ThreadPool(processes=int(len(ROOT_SERVERS) / 3)) # Threadpool value is somewhat subjective
+    traces = pool.map(trace_route_v4, [ROOT_SERVERS[rsi].ipv4 for rsi in ROOT_SERVERS])
+    dbgLog(LOG_DEBUG, "traceroute results: " + repr(traces))
+    for rsi,trace in zip(ROOT_SERVERS, traces):
+      ROOT_SERVERS[rsi].traceroute_v4 = trace
 
   # DNS tests
   for ii in range(1, args.num_tests + 1):
@@ -590,11 +604,13 @@ if not args.no_v4:
 
 # Perform IPv6 tests
 if not args.no_v6 and IPV6_SUPPORT:
-
   if not args.no_traceroute:
-    for rsi in ROOT_SERVERS:
-      fancy_output(0, "\rPerforming traceroute6 to " + rsi)
-      ROOT_SERVERS[rsi].traceroute_v6 = trace_route(find_binary('traceroute6'), ROOT_SERVERS[rsi].ipv6)
+    fancy_output(0, "\rStarting traceroute6 tests")
+    pool = ThreadPool(processes=int(len(ROOT_SERVERS) / 3)) # Threadpool value is somewhat subjective
+    traces = pool.map(trace_route_v6, [ROOT_SERVERS[rsi].ipv6 for rsi in ROOT_SERVERS])
+    dbgLog(LOG_DEBUG, "traceroute6 results: " + repr(traces))
+    for rsi,trace in zip(ROOT_SERVERS, traces):
+      ROOT_SERVERS[rsi].traceroute_v6 = trace
 
   # DNS tests
   for ii in range(1, args.num_tests + 1):
