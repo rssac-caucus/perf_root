@@ -96,7 +96,7 @@ class RootServer():
       self.times_v6[proto][tld].append(time)
 
   # Return list of all IPv4 testing times
-  def get_times_v4(self):
+  def get_flattened_times_v4(self):
     if len(self.times_v4) == 0:
       return [0.0]
     else:
@@ -106,7 +106,7 @@ class RootServer():
       return rv
 
   # Return list of all IPv6 testing times
-  def get_times_v6(self):
+  def get_flattened_times_v6(self):
     if len(self.times_v6) == 0:
       return [0.0]
     else:
@@ -285,7 +285,9 @@ def find_tlds(qstr, x):
       resp = send_walk_query(dn_down)
       if resp == None:
         dbgLog(LOG_WARN, "find_tlds walk_down query failed for " + qstr)
-      dn_down, _ = handle_walk_response(resp)
+        continue
+      else:
+        dn_down, _ = handle_walk_response(resp)
       if dn_down == None:
         dbgLog(LOG_DEBUG, "find_tlds finished walking down")
         going_down = False
@@ -299,8 +301,9 @@ def find_tlds(qstr, x):
       resp = send_walk_query(dn_up)
       if resp == None:
         dbgLog(LOG_WARN, "find_tlds walk_up query failed for " + qstr)
-        # TODO: Need to handle this better, shound NOT call handle_walk_respose if this is TRUE
-      _, dn_up = handle_walk_response(resp)
+        continue
+      else:
+        _, dn_up = handle_walk_response(resp)
       if dn_up == None:
         dbgLog(LOG_WARN, "find_tlds finished walking up")
         going_up = False
@@ -423,7 +426,6 @@ def trace_route_v4(ip):
 
 # IPv6 wrapper for trace_route()
 def trace_route_v6(ip):
-  time.sleep(random.randint(0, int(len(ROOT_SERVERS) / 3)) * 2)
   return trace_route(find_binary('traceroute6'), ip)
 
 # Parse the root-hints file and return a dict of RSIs
@@ -526,6 +528,10 @@ ap.add_argument('-t', '--num-tests', type=int, action='store', default=2,
 ap.add_argument('-v', '--verbose', action='count', default=0,
                   dest='verbose', help='Verbose output, repeat for increased verbosity')
 
+# A high num_threads value can cause dropped traceroute probes at first gateway 
+ap.add_argument('--threads', type=int, action='store', default=4, 
+                  dest='num_threads', help='Number of test threads to run concurrently')
+
 ap.add_argument('--no-tcp', action='store_true', default=False, # Toggle UDP/TCP testing off
                   dest='no_tcp', help='Turn off TCP testing')
 ap.add_argument('--no-udp', action='store_true', default=False,
@@ -573,11 +579,13 @@ random.seed()
 tlds = find_tlds(chr(random.randint(97, 122)) + chr(random.randint(97, 122)), args.num_tlds)
 fancy_output(1, "Found " + str(len(tlds)) + " TLDs")
 
+# Our pool of worker threads
+pool = ThreadPool(processes=args.num_threads)
+
 # Perform IPv4 tests
 if not args.no_v4:
   if not args.no_traceroute:
-    fancy_output(0, "\rStarting traceroute tests")
-    pool = ThreadPool(processes=int(len(ROOT_SERVERS) / 3)) # Threadpool value is somewhat subjective
+    fancy_output(0, "\rRunning traceroute tests with " + str(args.num_threads) + " threads")
     traces = pool.map(trace_route_v4, [ROOT_SERVERS[rsi].ipv4 for rsi in ROOT_SERVERS])
     dbgLog(LOG_DEBUG, "traceroute results: " + repr(traces))
     for rsi,trace in zip(ROOT_SERVERS, traces):
@@ -590,7 +598,7 @@ if not args.no_v4:
 
     for rsi in ROOT_SERVERS:
       for tld in tlds:
-        times_v4 = ROOT_SERVERS[rsi].get_times_v4()
+        times_v4 = ROOT_SERVERS[rsi].get_flattened_times_v4()
         mean = str(statistics.mean(times_v4))[:SIG_CHARS]
         minimum = str(min(times_v4))[:SIG_CHARS]
         maximum = str(max(times_v4))[:SIG_CHARS]
@@ -605,8 +613,7 @@ if not args.no_v4:
 # Perform IPv6 tests
 if not args.no_v6 and IPV6_SUPPORT:
   if not args.no_traceroute:
-    fancy_output(0, "\rStarting traceroute6 tests")
-    pool = ThreadPool(processes=int(len(ROOT_SERVERS) / 3)) # Threadpool value is somewhat subjective
+    fancy_output(0, "\rRunning traceroute6 tests with " + str(args.num_threads) + " threads")
     traces = pool.map(trace_route_v6, [ROOT_SERVERS[rsi].ipv6 for rsi in ROOT_SERVERS])
     dbgLog(LOG_DEBUG, "traceroute6 results: " + repr(traces))
     for rsi,trace in zip(ROOT_SERVERS, traces):
@@ -619,7 +626,7 @@ if not args.no_v6 and IPV6_SUPPORT:
 
     for rsi in ROOT_SERVERS:
       for tld in tlds:
-        times_v6 = ROOT_SERVERS[rsi].get_times_v6()
+        times_v6 = ROOT_SERVERS[rsi].get_flattened_times_v6()
         mean = str(statistics.mean(times_v6))[:SIG_CHARS]
         minimum = str(min(times_v6))[:SIG_CHARS]
         maximum = str(max(times_v6))[:SIG_CHARS]
