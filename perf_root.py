@@ -601,14 +601,14 @@ if not args.no_v4:
     times_v4 = []
     if not args.no_udp:
       udp_times = pool.starmap(timed_query, [[dns.query.udp, tld, ip] for tld, ip in itertools.product(tlds, ipv4_addresses)])
-      times_v4 += udp_times
+      times_v4 += [time for time in udp_times if time >= 0]
       for tld in tlds:
         for rsi in ROOT_SERVERS:
             rsi.add_time_v4('udp', tld, udp_times.pop(0))
 
     if not args.no_tcp:
       tcp_times = pool.starmap(timed_query, [[dns.query.tcp, tld, ip] for tld, ip in itertools.product(tlds, ipv4_addresses)])
-      times_v4 += tcp_times
+      times_v4 += [time for time in tcp_times if time >= 0]
       for tld in tlds:
         for rsi in ROOT_SERVERS:
             rsi.add_time_v4('tcp', tld, tcp_times.pop(0))
@@ -635,14 +635,14 @@ if not args.no_v6 and IPV6_SUPPORT:
     times_v6 = []
     if not args.no_udp:
       udp_times = pool.starmap(timed_query, [[dns.query.udp, tld, ip] for tld, ip in itertools.product(tlds, ipv6_addresses)])
-      times_v6 += udp_times
+      times_v6 += [time for time in udp_times if time >= 0]
       for tld in tlds:
         for rsi in ROOT_SERVERS:
             rsi.add_time_v6('udp', tld, udp_times.pop(0))
 
     if not args.no_tcp:
       tcp_times = pool.starmap(timed_query, [[dns.query.tcp, tld, ip] for tld, ip in itertools.product(tlds, ipv6_addresses)])
-      times_v6 += tcp_times
+      times_v6 += [time for time in tcp_times if time >= 0]
       for tld in tlds:
         for rsi in ROOT_SERVERS:
             rsi.add_time_v6('tcp', tld, tcp_times.pop(0))
