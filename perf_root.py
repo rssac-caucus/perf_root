@@ -185,6 +185,9 @@ def fancy_output(delay, ss):
   if LOG_LEVEL >= LOG_DEBUG or LOG_LEVEL <= LOG_ERROR:
     return
 
+  if ss[0] != '\r':
+    ss = '\r' + ss
+
   if len(ss) > window:
     dbgLog(LOG_ERROR, "fancy_output: print window exceeded")
     return
@@ -350,13 +353,13 @@ def timed_query(fn, tld, ip):
   try:
     fn(query, str(ip), timeout=args.query_timeout)
   except dns.exception.Timeout:
-    dbgLog(LOG_WARN, "timed_query: timeout " + fn.__name__ + " " + tld + " ip:" + str(ip))
+    dbgLog(LOG_WARN, "timed_query: timeout qname:" + tld + " ip:" + str(ip) + ":" + fn.__name__)
     return -1
   except dns.query.BadResponse:
-    dbgLog(LOG_WARN, "timed_query: bad response " + fn.__name__ + " " + tld + " ip:" + str(ip))
+    dbgLog(LOG_WARN, "timed_query: bad response qname:" + tld + " ip:" + str(ip) + ":" + fn.__name__)
     return -1
   except:
-    dbgLog(LOG_WARN, "timed_query: general error " + fn.__name__ + " " + tld + " ip:" + str(ip))
+    dbgLog(LOG_WARN, "timed_query: general error qname:" + tld + " ip:" + str(ip) + ":" + fn.__name__)
     return -1
 
   dbgLog(LOG_DEBUG, "timed_query " + tld + " " + str(ip) + " " + str(time.perf_counter() - start_time))
@@ -365,7 +368,7 @@ def timed_query(fn, tld, ip):
 # Perform a traceroute
 # Takes a traceroute binary location(type:string) and an IP address(type:ipaddress)
 # Returns list of lists of gateways(type:string)
-def trace_route(binary, ip): # Only tested with Linux thus far
+def trace_route(binary, ip):
 
   # Parses each line returned from traceroute cmd
   # Takes a line
@@ -553,6 +556,7 @@ args = ap.parse_args()
 
 LOG_LEVEL = min(args.verbose, LOG_DEBUG)
 dbgLog(LOG_INFO, "Begin Execution")
+fancy_output(0, "\rBegin Execution")
 
 if args.no_v4 and args.no_v6:
   death("Both IPv4 and IPv6 disabled")
@@ -581,7 +585,7 @@ if args.no_v4 and not IPV6_SUPPORT:
 random.seed()
 # This ranges from 'aa' to 'zz'
 tlds = find_tlds(chr(random.randint(97, 122)) + chr(random.randint(97, 122)), args.num_tlds)
-fancy_output(1, "Found " + str(len(tlds)) + " TLDs")
+fancy_output(1, "\rFound " + str(len(tlds)) + " TLDs")
 
 # Our pool of worker threads
 pool = ThreadPool(processes=args.num_threads)
@@ -593,11 +597,18 @@ if not args.no_v4:
   if not args.no_traceroute:
     fancy_output(0, "\rRunning traceroute with " + str(args.num_threads) + " threads")
     traces = pool.starmap(trace_route, zip(itertools.repeat(find_binary('traceroute')), ipv4_addresses))
-    dbgLog(LOG_DEBUG, "traceroute results: " + repr(traces))
+    lengths = []
     for rsi,trace in zip(ROOT_SERVERS, traces):
+      dbgLog(LOG_DEBUG, "traceroute_" + rsi.name + " len:" + str(len(trace)) + " first:" + repr(trace[0]))
+      lengths.append(len(trace))
       rsi.traceroute_v4 = trace
 
-  fancy_output(0.5, "\rRunning IPv4 DNS queries with " + str(args.num_threads) + " threads")
+    median = str(statistics.median(lengths))
+    minimum = str(min(lengths))
+    maximum = str(max(lengths))
+    fancy_output(5, "\rtraceroute min:" + minimum + " max:" + maximum + " median:" + median)
+
+  fancy_output(0, "\rRunning IPv4 DNS queries with " + str(args.num_threads) + " threads")
   dbgLog(LOG_INFO, "Running IPv4 DNS queries with " + str(args.num_threads) + " threads")
   for ii in range(1, args.num_tests + 1):
     times_v4 = []
@@ -627,9 +638,16 @@ if not args.no_v6 and IPV6_SUPPORT:
   if not args.no_traceroute:
     fancy_output(0, "\rRunning traceroute6 with " + str(args.num_threads) + " threads")
     traces = pool.starmap(trace_route, zip(itertools.repeat(find_binary('traceroute6')), ipv6_addresses))
-    dbgLog(LOG_DEBUG, "traceroute6 results: " + repr(traces))
+    lengths = []
     for rsi,trace in zip(ROOT_SERVERS, traces):
+      dbgLog(LOG_DEBUG, "traceroute6_" + rsi.name + " len:" + str(len(trace)) + " first:" + repr(trace[0]))
+      lengths.append(len(trace))
       rsi.traceroute_v6 = trace
+
+    median = str(statistics.median(lengths))
+    minimum = str(min(lengths))
+    maximum = str(max(lengths))
+    fancy_output(5, "\rtraceroute6 min:" + minimum + " max:" + maximum + " median:" + median)
 
   fancy_output(0.5, "\rRunning IPv6 DNS queries with " + str(args.num_threads) + " threads")
   dbgLog(LOG_INFO, "Running IPv6 DNS queries with " + str(args.num_threads) + " threads")
