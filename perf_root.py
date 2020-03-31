@@ -388,7 +388,7 @@ def trace_route(binary, ip):
     return gateways
 
   # Delay start time to prevent packet drops at first gateway
-  time.sleep(random.randint(0, int(len(ROOT_SERVERS) / 3)) * 2)
+  time.sleep(random.uniform(0, args.num_threads * 2))
 
   cmd = binary + " -n " + str(ip)
   dbgLog(LOG_INFO, "trace_route:" + cmd)
@@ -629,7 +629,7 @@ if not args.no_v4:
     mean = str(statistics.mean(times_v4))[:SIG_CHARS]
     minimum = str(min(times_v4))[:SIG_CHARS]
     maximum = str(max(times_v4))[:SIG_CHARS]
-    fancy_output(args.delay, "\rIPv4 test cycle " + str(ii) + " min:" + minimum + " max:" + maximum + " avg:" + mean)
+    fancy_output(args.delay, "\rIPv4 DNS test cycle " + str(ii) + " min:" + minimum + " max:" + maximum + " avg:" + mean)
 
 # Perform IPv6 tests
 if not args.no_v6 and IPV6_SUPPORT:
@@ -670,7 +670,7 @@ if not args.no_v6 and IPV6_SUPPORT:
     mean = str(statistics.mean(times_v6))[:SIG_CHARS]
     minimum = str(min(times_v6))[:SIG_CHARS]
     maximum = str(max(times_v6))[:SIG_CHARS]
-    fancy_output(args.delay, "\rIPv6 test cycle " + str(ii) + " min:" + minimum + " max:" + maximum + " avg:" + mean)
+    fancy_output(args.delay, "\rIPv6 DNS test cycle " + str(ii) + " min:" + minimum + " max:" + maximum + " avg:" + mean)
 
 fancy_output(0, "\rFinished testing")
 print()
