@@ -512,13 +512,16 @@ signal.signal(signal.SIGSEGV, euthanize)
 signal.signal(signal.SIGHUP, euthanize)
 
 # CLI options
+args_epilog = "If --out-file is not specified stdout is used. \
+A high --threads value can cause dropped traceroute probes at first next-hop."
+
 ap = argparse.ArgumentParser(description = 'Test DNS Root Servers',
                                formatter_class = argparse.ArgumentDefaultsHelpFormatter,
-                               epilog = 'If --out-file is not specified stdout is used.')
+                               epilog = args_epilog)
 ap.add_argument('-d', '--delay', type=float, action='store', default=0.05,
                   dest='delay', help='Delay between each test cycle in seconds')
 ap.add_argument('-n', '--num-tlds', type=int, action='store', default=10,
-                  dest='num_tlds', help='Number of TLDs to test')
+                  dest='num_tlds', help='Number of TLDs to query for')
 ap.add_argument('-o', '--out-file', type=str, action='store', default='',
                   dest='out_file', help='Filename for output')
 ap.add_argument('-q', '--query-timeout', type=int, action='store', default=10,
@@ -530,9 +533,8 @@ ap.add_argument('-t', '--num-tests', type=int, action='store', default=2,
 ap.add_argument('-v', '--verbose', action='count', default=0,
                   dest='verbose', help='Verbose output, repeat for increased verbosity')
 
-# A high num_threads value can cause dropped traceroute probes at first gateway
 ap.add_argument('--threads', type=int, action='store', default=4, 
-                  dest='num_threads', help='Number of test threads to run concurrently')
+                  dest='num_threads', help='Number of threads to run concurrently')
 
 ap.add_argument('--no-tcp', action='store_true', default=False, # Toggle UDP/TCP testing off
                   dest='no_tcp', help='Turn off TCP testing')
