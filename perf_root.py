@@ -614,9 +614,11 @@ if not args.no_v4:
 
 # Perform IPv6 tests
 if not args.no_v6 and IPV6_SUPPORT:
+  ipv6_addresses = [ROOT_SERVERS[rsi].ipv6 for rsi in ROOT_SERVERS]
+
   if not args.no_traceroute:
     fancy_output(0, "\rRunning traceroute6 tests with " + str(args.num_threads) + " threads")
-    traces = pool.starmap(trace_route, zip(itertools.repeat('/usr/bin/traceroute6'), [ROOT_SERVERS[rsi].ipv4 for rsi in ROOT_SERVERS]))
+    traces = pool.starmap(trace_route, zip(itertools.repeat('/usr/bin/traceroute6'), ipv6_addresses))
     dbgLog(LOG_DEBUG, "traceroute6 results: " + repr(traces))
     for rsi,trace in zip(ROOT_SERVERS, traces):
       ROOT_SERVERS[rsi].traceroute_v6 = trace
