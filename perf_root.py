@@ -590,7 +590,7 @@ if not args.no_v4:
 
   if not args.no_traceroute:
     fancy_output(0, "\rRunning traceroute with " + str(args.num_threads) + " threads")
-    traces = pool.starmap(trace_route, zip(itertools.repeat('/usr/bin/traceroute'), ipv4_addresses))
+    traces = pool.starmap(trace_route, zip(itertools.repeat(find_binary('traceroute')), ipv4_addresses))
     dbgLog(LOG_DEBUG, "traceroute results: " + repr(traces))
     for rsi,trace in zip(ROOT_SERVERS, traces):
       rsi.traceroute_v4 = trace
@@ -624,7 +624,7 @@ if not args.no_v6 and IPV6_SUPPORT:
 
   if not args.no_traceroute:
     fancy_output(0, "\rRunning traceroute6 with " + str(args.num_threads) + " threads")
-    traces = pool.starmap(trace_route, zip(itertools.repeat('/usr/bin/traceroute6'), ipv6_addresses))
+    traces = pool.starmap(trace_route, zip(itertools.repeat(find_binary('traceroute6')), ipv6_addresses))
     dbgLog(LOG_DEBUG, "traceroute6 results: " + repr(traces))
     for rsi,trace in zip(ROOT_SERVERS, traces):
       rsi.traceroute_v6 = trace
