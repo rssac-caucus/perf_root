@@ -28,6 +28,7 @@ import dns.rdatatype
 import dns.query
 #import hashlib
 import ipaddress
+import itertools
 import json
 import os
 from multiprocessing.pool import ThreadPool
@@ -349,13 +350,16 @@ def timed_query(fn, tld, ip):
   try:
     fn(query, str(ip), timeout=args.query_timeout)
   except dns.exception.Timeout:
-    dbgLog(LOG_ERROR, "timed_query: timeout " + fn.__name__ + " " + tld + " ip:" + str(ip))
+    dbgLog(LOG_WARN, "timed_query: timeout " + fn.__name__ + " " + tld + " ip:" + str(ip))
     return -1
   except dns.query.BadResponse:
-    dbgLog(LOG_ERROR, "timed_query: bad response " + fn.__name__ + " " + tld + " ip:" + str(ip))
+    dbgLog(LOG_WARN, "timed_query: bad response " + fn.__name__ + " " + tld + " ip:" + str(ip))
+    return -1
+  except:
+    dbgLog(LOG_WARN, "timed_query: general error " + fn.__name__ + " " + tld + " ip:" + str(ip))
     return -1
 
-  dbgLog(LOG_DEBUG, "timed_query time: " + str(time.perf_counter() - start_time))
+  dbgLog(LOG_DEBUG, "timed_query " + tld + " " + str(ip) + " " + str(time.perf_counter() - start_time))
   return time.perf_counter() - start_time
 
 # Perform a traceroute
@@ -419,14 +423,6 @@ def trace_route(binary, ip): # Only tested with Linux thus far
   except subprocess.CalledProcessError as e:
     dbgLog(LOG_ERROR, "trace_route subprocess CallProcessError" + str(e))
     raise
-
-# IPv4 wrapper for trace_route()
-def trace_route_v4(ip):
-  return trace_route(find_binary('traceroute'), ip)
-
-# IPv6 wrapper for trace_route()
-def trace_route_v6(ip):
-  return trace_route(find_binary('traceroute6'), ip)
 
 # Parse the root-hints file and return a dict of RSIs
 def parse_root_hints(root_hints):
@@ -514,7 +510,7 @@ ap = argparse.ArgumentParser(description = 'Test DNS Root Servers',
                                formatter_class = argparse.ArgumentDefaultsHelpFormatter,
                                epilog = 'If --out-file is not specified stdout is used.')
 ap.add_argument('-d', '--delay', type=float, action='store', default=0.05,
-                  dest='delay', help='Delay between tests in seconds')
+                  dest='delay', help='Delay between each test cycle in seconds')
 ap.add_argument('-n', '--num-tlds', type=int, action='store', default=10,
                   dest='num_tlds', help='Number of TLDs to test')
 ap.add_argument('-o', '--out-file', type=str, action='store', default='',
@@ -524,11 +520,11 @@ ap.add_argument('-q', '--query-timeout', type=int, action='store', default=10,
 ap.add_argument('-r', '--root-hints', type=str, action='store', default='named.cache',
                   dest='root_hints', help='Root hints file')
 ap.add_argument('-t', '--num-tests', type=int, action='store', default=2,
-                  dest='num_tests', help='Number of tests per-TLD')
+                  dest='num_tests', help='Number of test cycles per-TLD')
 ap.add_argument('-v', '--verbose', action='count', default=0,
                   dest='verbose', help='Verbose output, repeat for increased verbosity')
 
-# A high num_threads value can cause dropped traceroute probes at first gateway 
+# A high num_threads value can cause dropped traceroute probes at first gateway
 ap.add_argument('--threads', type=int, action='store', default=4, 
                   dest='num_threads', help='Number of test threads to run concurrently')
 
@@ -584,59 +580,69 @@ pool = ThreadPool(processes=args.num_threads)
 
 # Perform IPv4 tests
 if not args.no_v4:
+  ipv4_addresses = [ROOT_SERVERS[rsi].ipv4 for rsi in ROOT_SERVERS]
+
   if not args.no_traceroute:
     fancy_output(0, "\rRunning traceroute tests with " + str(args.num_threads) + " threads")
-    traces = pool.map(trace_route_v4, [ROOT_SERVERS[rsi].ipv4 for rsi in ROOT_SERVERS])
+    traces = pool.starmap(trace_route, zip(itertools.repeat('/usr/bin/traceroute'), ipv4_addresses))
     dbgLog(LOG_DEBUG, "traceroute results: " + repr(traces))
     for rsi,trace in zip(ROOT_SERVERS, traces):
       ROOT_SERVERS[rsi].traceroute_v4 = trace
 
-  # DNS tests
+  fancy_output(0.5, "\rRunning IPv4 DNS queries with " + str(args.num_threads) + " threads")
+  dbgLog(LOG_DEBUG, "Running IPv4 DNS queries with " + str(args.num_threads) + " threads")
   for ii in range(1, args.num_tests + 1):
-    fancy_output(1, "\rStarting IPv4 test round " + str(ii))
-    dbgLog(LOG_DEBUG, "Starting IPv4 test round " + str(ii))
-
-    for rsi in ROOT_SERVERS:
+    times_v4 = []
+    if not args.no_udp:
+      udp_times = pool.starmap(timed_query, [[dns.query.udp, tld, ip] for tld, ip in itertools.product(tlds, ipv4_addresses)])
+      times_v4 += udp_times
       for tld in tlds:
-        times_v4 = ROOT_SERVERS[rsi].get_flattened_times_v4()
-        mean = str(statistics.mean(times_v4))[:SIG_CHARS]
-        minimum = str(min(times_v4))[:SIG_CHARS]
-        maximum = str(max(times_v4))[:SIG_CHARS]
-        fancy_output(0, "\rv4:" + ROOT_SERVERS[rsi].name + " min:" + minimum + " max:" + maximum + " avg:" + mean)
-        if not args.no_udp:
-          ROOT_SERVERS[rsi].add_time_v4('udp', tld, timed_query(dns.query.udp, tld, ROOT_SERVERS[rsi].ipv4))
-          time.sleep(args.delay)
-        if not args.no_tcp:
-          ROOT_SERVERS[rsi].add_time_v4('tcp', tld, timed_query(dns.query.tcp, tld, ROOT_SERVERS[rsi].ipv4))
-          time.sleep(args.delay)
+        for rsi in ROOT_SERVERS:
+            ROOT_SERVERS[rsi].add_time_v4('udp', tld, udp_times.pop(0))
+
+    if not args.no_tcp:
+      tcp_times = pool.starmap(timed_query, [[dns.query.tcp, tld, ip] for tld, ip in itertools.product(tlds, ipv4_addresses)])
+      times_v4 += tcp_times
+      for tld in tlds:
+        for rsi in ROOT_SERVERS:
+            ROOT_SERVERS[rsi].add_time_v4('tcp', tld, tcp_times.pop(0))
+
+    mean = str(statistics.mean(times_v4))[:SIG_CHARS]
+    minimum = str(min(times_v4))[:SIG_CHARS]
+    maximum = str(max(times_v4))[:SIG_CHARS]
+    fancy_output(args.delay, "\rIPv4 test cycle " + str(ii) + " min:" + minimum + " max:" + maximum + " avg:" + mean)
 
 # Perform IPv6 tests
 if not args.no_v6 and IPV6_SUPPORT:
   if not args.no_traceroute:
     fancy_output(0, "\rRunning traceroute6 tests with " + str(args.num_threads) + " threads")
-    traces = pool.map(trace_route_v6, [ROOT_SERVERS[rsi].ipv6 for rsi in ROOT_SERVERS])
+    traces = pool.starmap(trace_route, zip(itertools.repeat('/usr/bin/traceroute6'), [ROOT_SERVERS[rsi].ipv4 for rsi in ROOT_SERVERS]))
     dbgLog(LOG_DEBUG, "traceroute6 results: " + repr(traces))
     for rsi,trace in zip(ROOT_SERVERS, traces):
       ROOT_SERVERS[rsi].traceroute_v6 = trace
 
-  # DNS tests
+  fancy_output(0.5, "\rRunning IPv6 DNS queries with " + str(args.num_threads) + " threads")
+  dbgLog(LOG_DEBUG, "Running IPv6 DNS queries with " + str(args.num_threads) + " threads")
   for ii in range(1, args.num_tests + 1):
-    fancy_output(1, "\rStarting IPv6 test round " + str(ii))
-    dbgLog(LOG_DEBUG, "Starting IPv6 test round " + str(ii))
-
-    for rsi in ROOT_SERVERS:
+    times_v6 = []
+    if not args.no_udp:
+      udp_times = pool.starmap(timed_query, [[dns.query.udp, tld, ip] for tld, ip in itertools.product(tlds, ipv6_addresses)])
+      times_v6 += udp_times
       for tld in tlds:
-        times_v6 = ROOT_SERVERS[rsi].get_flattened_times_v6()
-        mean = str(statistics.mean(times_v6))[:SIG_CHARS]
-        minimum = str(min(times_v6))[:SIG_CHARS]
-        maximum = str(max(times_v6))[:SIG_CHARS]
-        fancy_output(0, "\rv6:" + ROOT_SERVERS[rsi].name + " min:" + minimum + " max:" + maximum + " avg:" + mean)
-        if not args.no_udp:
-          ROOT_SERVERS[rsi].add_time_v6('udp', tld, timed_query(dns.query.udp, tld, ROOT_SERVERS[rsi].ipv6))
-          time.sleep(args.delay)
-        if not args.no_tcp:
-          ROOT_SERVERS[rsi].add_time_v6('tcp', tld, timed_query(dns.query.tcp, tld, ROOT_SERVERS[rsi].ipv6))
-          time.sleep(args.delay)
+        for rsi in ROOT_SERVERS:
+            ROOT_SERVERS[rsi].add_time_v6('udp', tld, udp_times.pop(0))
+
+    if not args.no_tcp:
+      tcp_times = pool.starmap(timed_query, [[dns.query.tcp, tld, ip] for tld, ip in itertools.product(tlds, ipv6_addresses)])
+      times_v6 += tcp_times
+      for tld in tlds:
+        for rsi in ROOT_SERVERS:
+            ROOT_SERVERS[rsi].add_time_v6('tcp', tld, tcp_times.pop(0))
+
+    mean = str(statistics.mean(times_v6))[:SIG_CHARS]
+    minimum = str(min(times_v6))[:SIG_CHARS]
+    maximum = str(max(times_v6))[:SIG_CHARS]
+    fancy_output(args.delay, "\rIPv6 test cycle " + str(ii) + " min:" + minimum + " max:" + maximum + " avg:" + mean)
 
 fancy_output(0, "\rFinished testing")
 print()
