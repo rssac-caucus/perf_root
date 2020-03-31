@@ -56,16 +56,16 @@ LOG_SIZE = 1024 # Max logfile size in KB
 SIG_CHARS = 7 # How many significant characters to display in fancy output
 SYS_TYPE = '' # Enumerated type of system we're running on: linux, bsd, darwin, win32, cygwin
 TRACEROUTE_NUM_TIMEOUTS = 5 # Number of consecutive timed out traceroute probes we tolerate before giving up
-ROOT_SERVERS = None # Our list of DNS root servers
+ROOT_SERVERS = [] # Our list of DNS root servers
 
 ###########
 # Classes #
 ###########
 class RootServer():
-  def __init__(self, name):
+  def __init__(self, name, ipv4, ipv6):
     self.name = name
-    self.ipv4 = None
-    self.ipv6 = None
+    self.ipv4 = ipv4
+    self.ipv6 = ipv6
     self.times_v4 = {}
     self.times_v6 = {}
     self.traceroute_v4 = []
@@ -199,7 +199,7 @@ def fancy_output(delay, ss):
 # Send a single walk query and return a dnspython response message
 def send_walk_query(qstr):
   query = dns.message.make_query(qstr.lower(), 'NS', want_dnssec=True)
-  server = str(ROOT_SERVERS[random.choice(list(ROOT_SERVERS))].ipv4)
+  server = str(random.choice(ROOT_SERVERS).ipv4)
   dbgLog(LOG_DEBUG, "Using server:" + server)
 
   try:
@@ -388,7 +388,7 @@ def trace_route(binary, ip): # Only tested with Linux thus far
   time.sleep(random.randint(0, int(len(ROOT_SERVERS) / 3)) * 2)
 
   cmd = binary + " -n " + str(ip)
-  dbgLog(LOG_DEBUG, "trace_route:" + cmd)
+  dbgLog(LOG_INFO, "trace_route:" + cmd)
   try:
     proc = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True)
 
@@ -424,21 +424,28 @@ def trace_route(binary, ip): # Only tested with Linux thus far
     dbgLog(LOG_ERROR, "trace_route subprocess CallProcessError" + str(e))
     raise
 
-# Parse the root-hints file and return a dict of RSIs
+# Parse the root-hints file and return a list of RSIs
+# TODO: Write a proper parser using dnspython
 def parse_root_hints(root_hints):
-  rv = {}
+  rv = []
   fn = open(root_hints, 'r')
+  name = ipv4 = ipv6 = None
   for line in fn:
-    if line[0] != ';' and line[0] != '.':
-      rsi = line.split()[0].rstrip('.').lower()
-      if not rsi in rv:
-        rv[rsi] = RootServer(rsi)
-
+    if line.split()[0] == ';':
+      continue
+    elif line.split()[0] == '.':
+      name = line.split()[3].strip('.').lower()
+    else:
       ip = ipaddress.ip_address(line.split()[3])
+
       if ip.version == 4:
-        rv[rsi].ipv4 = ip
+        ipv4 = ip
       elif ip.version == 6:
-        rv[rsi].ipv6 = ip
+        ipv6 = ip
+
+    if name and ipv4 and ipv6:
+      rv.append(RootServer(name, ipv4, ipv6))
+      name = ipv4 = ipv6 = None
 
   fn.close()
   return rv
@@ -476,7 +483,6 @@ def find_binary(fn):
   if SYS_TYPE == 'bsd' or SYS_TYPE == 'linux' or SYS_TYPE == 'darwin':
     for directory in ['/usr/bin/', '/usr/sbin/', '/bin/', '/sbin/', '/usr/local/bin/', '/usr/local/sbin/']:
       if test(directory + fn):
-        #dbgLog(LOG_DEBUG, "Found " + directory + fn)
         return directory + fn
     return None
 
@@ -544,7 +550,7 @@ ap.add_argument('--no-traceroute', action='store_true', default=False,
 args = ap.parse_args()
 
 LOG_LEVEL = min(args.verbose, LOG_DEBUG)
-dbgLog(LOG_DEBUG, "Begin Execution")
+dbgLog(LOG_INFO, "Begin Execution")
 
 if args.no_v4 and args.no_v6:
   death("Both IPv4 and IPv6 disabled")
@@ -553,15 +559,15 @@ if args.no_udp and args.no_tcp:
   death("Both TCP and UDP disabled")
 
 SYS_TYPE = get_sys_type() # Determine what the OS is
-dbgLog(LOG_DEBUG, "SYS_TYPE:" + SYS_TYPE)
-ROOT_SERVERS = parse_root_hints(args.root_hints) # Get our root servers
+dbgLog(LOG_INFO, "SYS_TYPE:" + SYS_TYPE)
+ROOT_SERVERS = parse_root_hints(args.root_hints) # Get our list of root servers
 
 # Is IPv6 supported on this host?
 if not args.no_v6:
   IPV6_SUPPORT = True
   try:
     s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-    s.connect( (str(ROOT_SERVERS[random.choice(list(ROOT_SERVERS))].ipv6), 53) )
+    s.connect( (str(random.choice(ROOT_SERVERS).ipv6), 53) )
     s.close()
   except:
     dbgLog(LOG_INFO, "No local IPv6 configured")
@@ -580,17 +586,17 @@ pool = ThreadPool(processes=args.num_threads)
 
 # Perform IPv4 tests
 if not args.no_v4:
-  ipv4_addresses = [ROOT_SERVERS[rsi].ipv4 for rsi in ROOT_SERVERS]
+  ipv4_addresses = [rsi.ipv4 for rsi in ROOT_SERVERS]
 
   if not args.no_traceroute:
-    fancy_output(0, "\rRunning traceroute tests with " + str(args.num_threads) + " threads")
+    fancy_output(0, "\rRunning traceroute with " + str(args.num_threads) + " threads")
     traces = pool.starmap(trace_route, zip(itertools.repeat('/usr/bin/traceroute'), ipv4_addresses))
     dbgLog(LOG_DEBUG, "traceroute results: " + repr(traces))
     for rsi,trace in zip(ROOT_SERVERS, traces):
-      ROOT_SERVERS[rsi].traceroute_v4 = trace
+      rsi.traceroute_v4 = trace
 
   fancy_output(0.5, "\rRunning IPv4 DNS queries with " + str(args.num_threads) + " threads")
-  dbgLog(LOG_DEBUG, "Running IPv4 DNS queries with " + str(args.num_threads) + " threads")
+  dbgLog(LOG_INFO, "Running IPv4 DNS queries with " + str(args.num_threads) + " threads")
   for ii in range(1, args.num_tests + 1):
     times_v4 = []
     if not args.no_udp:
@@ -598,14 +604,14 @@ if not args.no_v4:
       times_v4 += udp_times
       for tld in tlds:
         for rsi in ROOT_SERVERS:
-            ROOT_SERVERS[rsi].add_time_v4('udp', tld, udp_times.pop(0))
+            rsi.add_time_v4('udp', tld, udp_times.pop(0))
 
     if not args.no_tcp:
       tcp_times = pool.starmap(timed_query, [[dns.query.tcp, tld, ip] for tld, ip in itertools.product(tlds, ipv4_addresses)])
       times_v4 += tcp_times
       for tld in tlds:
         for rsi in ROOT_SERVERS:
-            ROOT_SERVERS[rsi].add_time_v4('tcp', tld, tcp_times.pop(0))
+            rsi.add_time_v4('tcp', tld, tcp_times.pop(0))
 
     mean = str(statistics.mean(times_v4))[:SIG_CHARS]
     minimum = str(min(times_v4))[:SIG_CHARS]
@@ -614,17 +620,17 @@ if not args.no_v4:
 
 # Perform IPv6 tests
 if not args.no_v6 and IPV6_SUPPORT:
-  ipv6_addresses = [ROOT_SERVERS[rsi].ipv6 for rsi in ROOT_SERVERS]
+  ipv6_addresses = [rsi.ipv6 for rsi in ROOT_SERVERS]
 
   if not args.no_traceroute:
-    fancy_output(0, "\rRunning traceroute6 tests with " + str(args.num_threads) + " threads")
+    fancy_output(0, "\rRunning traceroute6 with " + str(args.num_threads) + " threads")
     traces = pool.starmap(trace_route, zip(itertools.repeat('/usr/bin/traceroute6'), ipv6_addresses))
     dbgLog(LOG_DEBUG, "traceroute6 results: " + repr(traces))
     for rsi,trace in zip(ROOT_SERVERS, traces):
-      ROOT_SERVERS[rsi].traceroute_v6 = trace
+      rsi.traceroute_v6 = trace
 
   fancy_output(0.5, "\rRunning IPv6 DNS queries with " + str(args.num_threads) + " threads")
-  dbgLog(LOG_DEBUG, "Running IPv6 DNS queries with " + str(args.num_threads) + " threads")
+  dbgLog(LOG_INFO, "Running IPv6 DNS queries with " + str(args.num_threads) + " threads")
   for ii in range(1, args.num_tests + 1):
     times_v6 = []
     if not args.no_udp:
@@ -632,14 +638,14 @@ if not args.no_v6 and IPV6_SUPPORT:
       times_v6 += udp_times
       for tld in tlds:
         for rsi in ROOT_SERVERS:
-            ROOT_SERVERS[rsi].add_time_v6('udp', tld, udp_times.pop(0))
+            rsi.add_time_v6('udp', tld, udp_times.pop(0))
 
     if not args.no_tcp:
       tcp_times = pool.starmap(timed_query, [[dns.query.tcp, tld, ip] for tld, ip in itertools.product(tlds, ipv6_addresses)])
       times_v6 += tcp_times
       for tld in tlds:
         for rsi in ROOT_SERVERS:
-            ROOT_SERVERS[rsi].add_time_v6('tcp', tld, tcp_times.pop(0))
+            rsi.add_time_v6('tcp', tld, tcp_times.pop(0))
 
     mean = str(statistics.mean(times_v6))[:SIG_CHARS]
     minimum = str(min(times_v6))[:SIG_CHARS]
@@ -652,7 +658,7 @@ print()
 # Create output and write it
 output = ''
 for rsi in ROOT_SERVERS:
-  output += ROOT_SERVERS[rsi].to_json()
+  output += rsi.to_json()
 
 if len(args.out_file) > 0:
   try:
