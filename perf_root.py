@@ -58,6 +58,7 @@ SIG_CHARS = 7 # How many significant characters to display in fancy output
 SYS_TYPE = '' # Enumerated type of system we're running on: linux, bsd, darwin, win32, cygwin
 TRACEROUTE_NUM_TIMEOUTS = 5 # Number of consecutive timed out traceroute probes we tolerate before giving up
 ROOT_SERVERS = [] # Our list of DNS root servers
+DYING = False # Are we in the process of dying
 
 ###########
 # Classes #
@@ -131,24 +132,24 @@ class RootServer():
 # GLOBAL FUNCTIONS #
 ####################
 def euthanize(signal, frame):
+  if threading.current_thread() != threading.main_thread():
+    return
 
-  '''
+  global DYING
+  DYING = True
+
   for thr in threading.enumerate():
     if thr.is_alive():
-      dbgLog(LOG_DEBUG, thr.name + " " + str(thr.daemon))
-
-    if isinstance(thr, threading.Timer):
-      try:
-        thr.cancel()
-      except:
-        pass
-  '''
+      dbgLog(LOG_DEBUG, "Thread " + thr.name + " daemon:" + str(thr.daemon))
 
   sys.stdout.write("\rSIG-" + str(signal) + " caught, exiting\n")
   sys.stdout.flush()
   sys.exit(1)
 
 def death(errStr=''):
+  global DYING
+  DYING = True
+
   sys.stdout.write("\rFATAL:" + errStr + "\n")
   sys.stdout.flush()
   sys.exit(1)
@@ -220,6 +221,9 @@ def fancy_output(delay, ss):
 
 # Send a single walk query and return a dnspython response message
 def send_walk_query(qstr):
+  if DYING:
+    return None
+
   query = dns.message.make_query(qstr.lower(), 'NS', want_dnssec=True)
   server = str(random.choice(ROOT_SERVERS).ipv4)
   dbgLog(LOG_DEBUG, "Using server:" + server)
@@ -374,8 +378,10 @@ def dn_dec(dn):
 # Takes a function for the type of query(TCP/UDP), a TLD to query, and an IP address
 # Returns time in seconds as float and -1 on failure
 def timed_query(fn, tld, ip):
-  query = dns.message.make_query(tld, 'NS')
+  if DYING:
+    return -1
 
+  query = dns.message.make_query(tld, 'NS')
   start_time = time.perf_counter()
   try:
     fn(query, str(ip), timeout=args.query_timeout)
@@ -413,6 +419,9 @@ def trace_route(binary, ip):
       except ValueError:
         continue
     return gateways
+
+  if DYING:
+    return []
 
   # Delay start time to prevent packet drops at first gateway
   time.sleep(random.uniform(0, args.num_threads * 2))
