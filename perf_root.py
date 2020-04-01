@@ -31,7 +31,7 @@ import ipaddress
 import itertools
 import json
 import os
-from multiprocessing.pool import ThreadPool
+import multiprocessing.pool
 import random
 #import re
 import signal
@@ -409,13 +409,13 @@ def trace_route(binary, ip):
   # Delay start time to prevent packet drops at first gateway
   time.sleep(random.uniform(0, args.num_threads * 2))
 
+  rv = []
   cmd = binary + " -n " + str(ip)
   dbgLog(LOG_INFO, "trace_route:" + cmd)
   try:
     proc = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True)
 
     # Keep reading lines until we run out or reach TRACEROUTE_NUM_TIMEOUTS
-    rv = []
     timeouts = 0
     while True:
       line = proc.stdout.readline()
@@ -441,10 +441,16 @@ def trace_route(binary, ip):
 
   except subprocess.TimeoutExpired as e:
     dbgLog(LOG_ERROR, "trace_route subprocess TimeoutExpired" + str(e))
-    raise
+    return rv
   except subprocess.CalledProcessError as e:
     dbgLog(LOG_ERROR, "trace_route subprocess CallProcessError" + str(e))
-    raise
+    return rv
+  except OSError as e:
+    dbgLog(LOG_ERROR, "trace_route subprocess OSError" + str(e))
+    return rv
+  except:
+    dbgLog(LOG_ERROR, "trace_route general error")
+    return rv
 
 # Parse the root-hints file and return a list of RSIs
 # TODO: Write a proper parser using dnspython
@@ -535,6 +541,8 @@ signal.signal(signal.SIGFPE, euthanize)
 signal.signal(signal.SIGILL, euthanize)
 
 # win32
+# https://bugs.python.org/issue26350
+# https://bugs.python.org/issue23948
 #signal.signal(signal.CTRL_BREAK_EVENT, euthanize)
 #signal.signal(signal.CTRL_C_EVENT, euthanize)
 
@@ -611,8 +619,12 @@ random.seed()
 tlds = find_tlds(chr(random.randint(97, 122)) + chr(random.randint(97, 122)), args.num_tlds)
 fancy_output(1, "\rFound " + str(len(tlds)) + " TLDs")
 
-# Our pool of worker threads
-pool = ThreadPool(processes=args.num_threads)
+# Our pool of worker threads/processes
+# signal catching is broken on OpenBSD if we use threads
+if SYS_TYPE == 'linux':
+  pool = multiprocessing.pool.ThreadPool(processes=args.num_threads)
+elif SYS_TYPE == 'bsd':
+  pool = multiprocessing.pool.Pool(processes=args.num_threads)
 
 # Perform IPv4 tests
 if not args.no_v4:
