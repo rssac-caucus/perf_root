@@ -531,7 +531,12 @@ signal.signal(signal.SIGTERM, euthanize)
 signal.signal(signal.SIGABRT, euthanize)
 signal.signal(signal.SIGALRM, euthanize)
 signal.signal(signal.SIGSEGV, euthanize)
-signal.signal(signal.SIGHUP, euthanize)
+signal.signal(signal.SIGFPE, euthanize)
+signal.signal(signal.SIGILL, euthanize)
+
+# win32
+#signal.signal(signal.CTRL_BREAK_EVENT, euthanize)
+#signal.signal(signal.CTRL_C_EVENT, euthanize)
 
 # CLI options
 args_epilog = "If --out-file is not specified stdout is used. \
