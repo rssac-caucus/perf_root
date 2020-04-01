@@ -39,6 +39,7 @@ import socket
 import statistics
 import subprocess
 import sys
+import threading
 import time
 
 ###########
@@ -130,6 +131,19 @@ class RootServer():
 # GLOBAL FUNCTIONS #
 ####################
 def euthanize(signal, frame):
+
+  for thr in threading.enumerate():
+    if thr.is_alive():
+      dbgLog(LOG_DEBUG, thr.name + " " + str(thr.daemon))
+
+      '''
+    if isinstance(thr, threading.Timer):
+      try:
+        thr.cancel()
+      except:
+        pass
+      '''
+
   sys.stdout.write("\rSIG-" + str(signal) + " caught, exiting\n")
   sys.stdout.flush()
   sys.exit(1)
