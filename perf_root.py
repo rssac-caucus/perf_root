@@ -179,18 +179,23 @@ def dbgLog(lvl, dbgStr):
 # Fancier output than normal debug logging
 # Takes a delay in seconds to wait after string(ss) is printed
 def fancy_output(delay, ss):
-  window = 70
+  window = 70 # Maximum length of ss
+  min_len = 2 # Minimum length of ss
 
   # Only triggers on WARN and INFO log levels
   if LOG_LEVEL >= LOG_DEBUG or LOG_LEVEL <= LOG_ERROR:
     return
 
-  if ss[0] != '\r':
-    ss = '\r' + ss
+  if len(ss) < min_len:
+    dbgLog(LOG_ERROR, "fancy_output: output too short")
+    return
 
   if len(ss) > window:
     dbgLog(LOG_ERROR, "fancy_output: print window exceeded")
     return
+
+  if ss[0] != '\r':
+    ss = '\r' + ss
 
   sys.stdout.write(ss)
   for ii in range(window - len(ss)):
