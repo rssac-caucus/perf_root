@@ -132,17 +132,17 @@ class RootServer():
 ####################
 def euthanize(signal, frame):
 
+  '''
   for thr in threading.enumerate():
     if thr.is_alive():
       dbgLog(LOG_DEBUG, thr.name + " " + str(thr.daemon))
 
-      '''
     if isinstance(thr, threading.Timer):
       try:
         thr.cancel()
       except:
         pass
-      '''
+  '''
 
   sys.stdout.write("\rSIG-" + str(signal) + " caught, exiting\n")
   sys.stdout.flush()
@@ -227,10 +227,13 @@ def send_walk_query(qstr):
   try:
     rv = dns.query.udp(query, server, ignore_unexpected=True, timeout=args.query_timeout)
   except dns.exception.Timeout:
-    dbgLog(LOG_ERROR, "send_walk_query: query timeout " + qstr)
+    dbgLog(LOG_ERROR, "send_walk_query: query timeout qname:" + qstr)
     return None
   except dns.query.BadResponse:
-    dbgLog(LOG_ERROR, "send_walk_query: bad response " + qstr)
+    dbgLog(LOG_ERROR, "send_walk_query: bad response qname:" + qstr)
+    return None
+  except:
+    dbgLog(LOG_ERROR, "send_walk_query: general error qname:" + qstr)
     return None
 
   return rv
@@ -279,12 +282,17 @@ def handle_walk_response(resp):
 # Returns list of X tlds alpha sorted
 def find_tlds(qstr, x):
   dbgLog(LOG_DEBUG, "find_tlds:" + qstr + " x:" + str(x))
+  first_query_retries = 5 # Number of times to retry our first query before dying
   tlds = {}
 
   # The first time is special
-  resp = send_walk_query(qstr)
-  if not resp:
-    death("First DNS query failed " + qstr)
+  for ii in range(first_query_retries):
+    resp = send_walk_query(qstr)
+    if not resp:
+      if ii == first_query_retries:
+        death("First DNS query failed " + str(first_query_retries) + " times " + qstr)
+    else:
+      break
 
   dn_down, dn_up = handle_walk_response(resp)
   if not dn_down or not dn_up:
