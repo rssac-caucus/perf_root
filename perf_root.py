@@ -399,8 +399,11 @@ def timed_query(fn, tld, ip):
   except dns.query.BadResponse:
     dbgLog(LOG_WARN, "timed_query: bad response qname:" + tld + " ip:" + str(ip) + ":" + fn.__name__)
     return -1
-  except:
-    dbgLog(LOG_WARN, "timed_query: general error qname:" + tld + " ip:" + str(ip) + ":" + fn.__name__)
+  except dns.query.UnexpectedSource:
+    dbgLog(LOG_WARN, "timed_query: bad source IP in response qname:" + tld + " ip:" + str(ip) + ":" + fn.__name__)
+    return -1
+  except dns.exception.DNSException as e:
+    dbgLog(LOG_WARN, "timed_query: general dns error qname:" + tld + " ip:" + str(ip) + ":" + fn.__name__)
     return -1
 
   dbgLog(LOG_DEBUG, "timed_query " + tld + " " + str(ip) + " " + str(time.perf_counter() - start_time))
@@ -473,8 +476,8 @@ def trace_route(binary, ip):
   except OSError as e:
     dbgLog(LOG_ERROR, "trace_route subprocess OSError" + str(e))
     return rv
-  except:
-    dbgLog(LOG_ERROR, "trace_route general error")
+  except subprocess.SubprocessError:
+    dbgLog(LOG_ERROR, "trace_route general subprocess error")
     return rv
 
 # Parse the root-hints file and return a list of RSIs
