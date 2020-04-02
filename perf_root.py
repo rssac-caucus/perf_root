@@ -57,6 +57,7 @@ LOG_SIZE = 1024 # Max logfile size in KB
 SIG_CHARS = 7 # How many significant characters to display in fancy output
 SYS_TYPE = '' # Enumerated type of system we're running on: linux, bsd, darwin, win32, cygwin
 TRACEROUTE_NUM_TIMEOUTS = 5 # Number of consecutive timed out traceroute probes we tolerate before giving up
+DNS_MAX_QUERIES = 5 # Number of query retries before we give up
 ROOT_SERVERS = [] # Our list of DNS root servers
 DYING = False # Are we in the process of dying
 
@@ -131,6 +132,7 @@ class RootServer():
 ####################
 # GLOBAL FUNCTIONS #
 ####################
+# Threadsafe version of death() for signal handling
 def euthanize(signal, frame):
   if threading.current_thread() != threading.main_thread():
     return
@@ -147,10 +149,7 @@ def euthanize(signal, frame):
 def death(errStr=''):
   global DYING
   DYING = True
-
-  sys.stdout.write("\rFATAL:" + errStr + "\n")
-  sys.stdout.flush()
-  sys.exit(1)
+  sys.exit("FATAL:" + errStr)
 
 # Logs message to LOG_FNAME or tty
 def dbgLog(lvl, dbgStr):
@@ -229,13 +228,16 @@ def send_walk_query(qstr):
   try:
     rv = dns.query.udp(query, server, ignore_unexpected=True, timeout=args.query_timeout)
   except dns.exception.Timeout:
-    dbgLog(LOG_ERROR, "send_walk_query: query timeout qname:" + qstr)
+    dbgLog(LOG_WARN, "send_walk_query: query timeout " + server + " qname:" + qstr)
     return None
   except dns.query.BadResponse:
-    dbgLog(LOG_ERROR, "send_walk_query: bad response qname:" + qstr)
+    dbgLog(LOG_WARN, "send_walk_query: bad response " + server + " qname:" + qstr)
     return None
-  except:
-    dbgLog(LOG_ERROR, "send_walk_query: general error qname:" + qstr)
+  except dns.query.UnexpectedSource:
+    dbgLog(LOG_WARN, "send_walk_query: bad source IP in response " + server + " qname:" + qstr)
+    return None
+  except dns.exception.DNSException as e:
+    dbgLog(LOG_WARN, "send_walk_query: general dns error " + server + " " + str(e))
     return None
 
   return rv
@@ -284,15 +286,14 @@ def handle_walk_response(resp):
 # Returns list of X tlds alpha sorted
 def find_tlds(qstr, x):
   dbgLog(LOG_DEBUG, "find_tlds:" + qstr + " x:" + str(x))
-  first_query_retries = 5 # Number of times to retry our first query before dying
   tlds = {}
 
   # The first time is special
-  for ii in range(first_query_retries):
+  for ii in range(DNS_MAX_QUERIES):
     resp = send_walk_query(qstr)
     if not resp:
-      if ii == first_query_retries:
-        death("First DNS query failed " + str(first_query_retries) + " times " + qstr)
+      if ii == DNS_MAX_QUERIES:
+        death("First DNS query failed " + str(DNS_MAX_QUERIES) + " times " + qstr)
     else:
       break
 
@@ -309,7 +310,12 @@ def find_tlds(qstr, x):
   # Keep going until we find x TLDs or all TLDs
   going_up = True
   going_down = True
+  query_attempts = 0
   while True:
+    if query_attempts > DNS_MAX_QUERIES:
+     dbgLog(LOG_DEBUG, "find_tlds_while DNS query failed " + str(DNS_MAX_QUERIES) + " times")
+     death("Max query attempts exceeded")
+
     dbgLog(LOG_DEBUG, "find_tlds_while dn_down:" + dn_down + " dn_up:" + dn_up + " len_tlds:" + str(len(tlds)))
     if len(tlds) >= x or not going_down and not going_up:
       return sorted(tlds)[:x]
@@ -318,8 +324,10 @@ def find_tlds(qstr, x):
       resp = send_walk_query(dn_down)
       if resp == None:
         dbgLog(LOG_WARN, "find_tlds walk_down query failed for " + qstr)
+        query_attempts += 1
         continue
       else:
+        query_attempts = 0
         dn_down, _ = handle_walk_response(resp)
       if dn_down == None:
         dbgLog(LOG_DEBUG, "find_tlds finished walking down")
@@ -334,8 +342,10 @@ def find_tlds(qstr, x):
       resp = send_walk_query(dn_up)
       if resp == None:
         dbgLog(LOG_WARN, "find_tlds walk_up query failed for " + qstr)
+        query_attempts += 1
         continue
       else:
+        query_attempts = 0
         _, dn_up = handle_walk_response(resp)
       if dn_up == None:
         dbgLog(LOG_WARN, "find_tlds finished walking up")
