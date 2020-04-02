@@ -138,13 +138,11 @@ def euthanize(signal, frame):
   global DYING
   DYING = True
 
-  for thr in threading.enumerate():
-    if thr.is_alive():
-      dbgLog(LOG_DEBUG, "Thread " + thr.name + " daemon:" + str(thr.daemon))
+  #  for thr in threading.enumerate():
+  #    if thr.is_alive():
+  #      dbgLog(LOG_DEBUG, "Thread name:" + thr.name + " id:" + str(thr.ident) + " daemon:" + str(thr.daemon))
 
-  sys.stdout.write("\rSIG-" + str(signal) + " caught, exiting\n")
-  sys.stdout.flush()
-  sys.exit(1)
+  sys.exit("SIG-" + str(signal) + " caught, exiting\n")
 
 def death(errStr=''):
   global DYING
