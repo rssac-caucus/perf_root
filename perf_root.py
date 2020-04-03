@@ -348,7 +348,7 @@ def find_tlds(qstr, x):
         query_attempts = 0
         _, dn_up = handle_walk_response(resp)
       if dn_up == None:
-        dbgLog(LOG_WARN, "find_tlds finished walking up")
+        dbgLog(LOG_DEBUG, "find_tlds finished walking up")
         going_up = False
         dn_up = '.'
       else:
@@ -357,18 +357,30 @@ def find_tlds(qstr, x):
         dn_up = dn_inc(dn_up)
 
 # Increment a domain name for walking
+# We only handle alpha characters, which is fine for the root zone
 def dn_inc(dn):
+  if len(dn) < 1: # Defensive programming
+    return 'a'
   if len(dn) < 63: # Maximum DNS label length == 63
-    return dn + 'a' # This is wrong!
+    if dn[-1:] == 'z':
+      if len(dn.strip('z')) == 0:
+        return dn + 'a'
+      else:
+        return dn_inc(dn.rstrip('z'))
+    else:
+      return dn[:-1] + chr(ord(dn[-1:]) + 1)
   else:
-    if ord(dn[-1:]) == 122: # lowercase 'z'
-      return dn_inc(dn[:-1]) + 'z'
+    if dn[-1:] == 'z':
+      if len(dn.strip('z')) == 0:
+        return dn # Defensive programming
+      else:
+        return dn_inc(dn.rstrip('z'))
     else:
       return dn[:-1] + chr(ord(dn[-1:]) + 1)
 
 # Decrement a domain name for walking
 def dn_dec(dn):
-  if len(dn) == 1: # min len == 1
+  if len(dn) <= 1: # min len == 1
     if dn == 'a':
       return 'a' # nothing comes before 'a'
     else:
