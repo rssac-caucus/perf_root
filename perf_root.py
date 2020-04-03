@@ -75,7 +75,7 @@ class RootServer():
     self.traceroute_v6 = []
 
   def __repr__(self):
-    return "ipv4:" + str(self.ipv4) + " ipv6:" + str(self.ipv6) + " times_v4:" + repr(self.times_v4) + " times_v6:" + repr(self.times_v6)
+    return "name:" + self.name + " ipv4:" + str(self.ipv4) + " ipv6:" + str(self.ipv6) + " times_v4:" + repr(self.times_v4) + " times_v6:" + repr(self.times_v6)
 
   # Add a testing time for IPv4
   # Takes a protocol(udp/tcp), TLD and a time
@@ -359,7 +359,7 @@ def find_tlds(qstr, x):
 # Increment a domain name for walking
 def dn_inc(dn):
   if len(dn) < 63: # Maximum DNS label length == 63
-    return dn + 'a'
+    return dn + 'a' # This is wrong!
   else:
     if ord(dn[-1:]) == 122: # lowercase 'z'
       return dn_inc(dn[:-1]) + 'z'
@@ -481,7 +481,7 @@ def trace_route(binary, ip):
     return rv
 
 # Parse the root-hints file and return a list of RSIs
-# TODO: Write a proper parser using dnspython
+# TODO: Migrate away from doing this
 def parse_root_hints(root_hints):
   rv = []
   fn = open(root_hints, 'r')
@@ -504,6 +504,41 @@ def parse_root_hints(root_hints):
       name = ipv4 = ipv6 = None
 
   fn.close()
+  return rv
+
+# Returns list of RSIs if possible, otherwise returns None
+# Uses locally configured resolver
+def discover_root_servers():
+  try:
+    d = dns.resolver.Resolver()
+  except dns.exception.DNSException as e:
+    dbgLog(LOG_WARN, "Local resolver not found " + repr(e))
+    return None
+
+  try:
+    resp = d.query('.', 'NS')
+  except dns.exception.DNSException as e:
+    dbgLog(LOG_WARN, "Failed to query local resolver for . " + repr(e))
+    return None
+
+  names = [str(name).strip('.').lower() for name in resp.rrset]
+
+  rv = []
+  for name in sorted(names):
+    try:
+      resp_a = d.query(name, 'A')
+    except dns.exception.DNSException as e:
+      dbgLog(LOG_WARN, "Failed querying A record for " + name + " " + repr(e))
+      return None
+
+    try:
+      resp_aaaa = d.query(name, 'AAAA')
+    except dns.exception.DNSException as e:
+      dbgLog(LOG_WARN, "Failed querying AAAA record for " + name + " " + repr(e))
+      return None
+
+    rv.append(RootServer(name, str(resp_a.rrset[0]), str(resp_aaaa.rrset[0])))
+
   return rv
 
 # Returns the type of system we are running on
@@ -626,7 +661,13 @@ if args.no_udp and args.no_tcp:
 
 SYS_TYPE = get_sys_type() # Determine what the OS is
 dbgLog(LOG_INFO, "SYS_TYPE:" + SYS_TYPE)
-ROOT_SERVERS = parse_root_hints(args.root_hints) # Get our list of root servers
+
+# Find our root servers
+ROOT_SERVERS = discover_root_servers()
+if not ROOT_SERVERS:
+  ROOT_SERVERS = parse_root_hints(args.root_hints) # Get our list of root servers
+dbgLog(LOG_DEBUG, "Found " + str(len(ROOT_SERVERS)) + " root servers")
+fancy_output(1, "\rFound " + str(len(ROOT_SERVERS)) + " root servers")
 
 # Is IPv6 supported on this host?
 if not args.no_v6:
@@ -645,10 +686,13 @@ if args.no_v4 and not IPV6_SUPPORT:
 random.seed()
 # This ranges from 'aa' to 'zz'
 tlds = find_tlds(chr(random.randint(97, 122)) + chr(random.randint(97, 122)), args.num_tlds)
+dbgLog(LOG_DEBUG, "Found " + str(len(tlds)) + " TLDs")
 fancy_output(1, "\rFound " + str(len(tlds)) + " TLDs")
 
 # Our pool of worker threads/processes
 # signal catching is broken on OpenBSD if we use threads
+# OpenBSD is still somewhat broken if we use processes
+# For now we can only support linux
 if SYS_TYPE == 'linux':
   pool = multiprocessing.pool.ThreadPool(processes=args.num_threads)
 elif SYS_TYPE == 'bsd':
@@ -670,7 +714,7 @@ if not args.no_v4:
     median = str(statistics.median(lengths))
     minimum = str(min(lengths))
     maximum = str(max(lengths))
-    fancy_output(5, "\rtraceroute min:" + minimum + " max:" + maximum + " median:" + median)
+    fancy_output(5, "\rtraceroute hops min:" + minimum + " max:" + maximum + " median:" + median)
 
   fancy_output(0, "\rRunning IPv4 DNS queries with " + str(args.num_threads) + " threads")
   dbgLog(LOG_INFO, "Running IPv4 DNS queries with " + str(args.num_threads) + " threads")
@@ -711,7 +755,7 @@ if not args.no_v6 and IPV6_SUPPORT:
     median = str(statistics.median(lengths))
     minimum = str(min(lengths))
     maximum = str(max(lengths))
-    fancy_output(5, "\rtraceroute6 min:" + minimum + " max:" + maximum + " median:" + median)
+    fancy_output(5, "\rtraceroute6 hops min:" + minimum + " max:" + maximum + " median:" + median)
 
   fancy_output(0.5, "\rRunning IPv6 DNS queries with " + str(args.num_threads) + " threads")
   dbgLog(LOG_INFO, "Running IPv6 DNS queries with " + str(args.num_threads) + " threads")
