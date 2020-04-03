@@ -635,7 +635,7 @@ if not args.no_v6:
     s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
     s.connect( (str(random.choice(ROOT_SERVERS).ipv6), 53) )
     s.close()
-  except:
+  except OSError:
     dbgLog(LOG_INFO, "No local IPv6 configured")
     IPV6_SUPPORT = False
 
@@ -749,7 +749,7 @@ if len(args.out_file) > 0:
     fh = open(args.out_file, 'w')
     fh.write(output)
     fh.close()
-  except:
+  except OSError:
     death("Unable to write to " + args.out_file)
 else:
   print(output)
