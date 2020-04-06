@@ -595,11 +595,8 @@ def auth_discover_root_servers():
           done = False
 
       if done:
-        rv = []
-        for disc in discovered:
-          rv.append(RootServer(disc['dn'], disc['v4'], disc['v6']))
-        return rv
-
+        return [RootServer(disc['dn'], disc['v4'], disc['v6']) for disc in discovered]
+      
   return None
 
 # Returns the type of system we are running on
