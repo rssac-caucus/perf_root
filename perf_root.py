@@ -61,6 +61,22 @@ DNS_MAX_QUERIES = 5 # Number of query retries before we give up
 ROOT_SERVERS = [] # Our list of DNS root servers
 DYING = False # Are we in the process of dying
 
+STATIC_SERVERS = [ # Only used to discover actual RSIs if local recursive resolution fails
+{'a': '198.41.0.4', 'aaaa': '2001:503:ba3e::2:30'},
+{'a': '199.9.14.201', 'aaaa': '2001:500:200::b'},
+{'a': '192.33.4.12', 'aaaa': '2001:500:2::c'},
+{'a': '199.7.91.13', 'aaaa': '2001:500:2d::d'},
+{'a': '192.203.230.10', 'aaaa': '2001:500:a8::e'},
+{'a': '192.5.5.241', 'aaaa': '2001:500:2f::f'},
+{'a': '192.112.36.4', 'aaaa': '2001:500:12::d0d'},
+{'a': '198.97.190.53', 'aaaa': '2001:500:1::53'},
+{'a': '192.36.148.17', 'aaaa': '2001:7fe::53'},
+{'a': '192.58.128.30', 'aaaa': '2001:503:c27::2:30'},
+{'a': '193.0.14.129', 'aaaa': '2001:7fd::1'},
+{'a': '199.7.83.42', 'aaaa': '2001:500:9f::42'},
+{'a': '202.12.27.33', 'aaaa': '2001:dc3::35'}
+]
+
 ###########
 # Classes #
 ###########
@@ -492,35 +508,9 @@ def trace_route(binary, ip):
     dbgLog(LOG_ERROR, "trace_route general subprocess error")
     return rv
 
-# Parse the root-hints file and return a list of RSIs
-# TODO: Migrate away from doing this
-def parse_root_hints(root_hints):
-  rv = []
-  fn = open(root_hints, 'r')
-  name = ipv4 = ipv6 = None
-  for line in fn:
-    if line.split()[0] == ';':
-      continue
-    elif line.split()[0] == '.':
-      name = line.split()[3].strip('.').lower()
-    else:
-      ip = ipaddress.ip_address(line.split()[3])
-
-      if ip.version == 4:
-        ipv4 = ip
-      elif ip.version == 6:
-        ipv6 = ip
-
-    if name and ipv4 and ipv6:
-      rv.append(RootServer(name, ipv4, ipv6))
-      name = ipv4 = ipv6 = None
-
-  fn.close()
-  return rv
-
 # Returns list of RSIs if possible, otherwise returns None
 # Uses locally configured resolver
-def discover_root_servers():
+def local_discover_root_servers():
   try:
     d = dns.resolver.Resolver()
   except dns.exception.DNSException as e:
@@ -552,6 +542,65 @@ def discover_root_servers():
     rv.append(RootServer(name, str(resp_a.rrset[0]), str(resp_aaaa.rrset[0])))
 
   return rv
+
+# Returns list of RSIs if possible, otherwise returns None
+# Uses STATIC_SERVERS to find all servers
+def auth_discover_root_servers():
+  random.shuffle(STATIC_SERVERS)
+
+  # dnspython may not return the full priming response in one query
+  # So we construct it from multiple queries just to be sure
+  discovered = []
+  for server in STATIC_SERVERS:
+    query = dns.message.make_query('.', 'NS')
+    dest = server['a']
+    dbgLog(LOG_DEBUG, "auth_discover_root_servers: Trying destination:" + dest)
+
+    try:
+      primer = dns.query.tcp(query, dest, timeout=args.query_timeout)
+      dbgLog(LOG_DEBUG, repr(primer.section_from_number(3)))
+    except dns.exception.Timeout:
+      dbgLog(LOG_WARN, "auth_discover_root_servers: query timeout " + dest)
+      continue
+    except dns.query.BadResponse:
+      dbgLog(LOG_WARN, "auth_discover_root_servers: bad response " + dest)
+      continue
+    except dns.query.UnexpectedSource:
+      dbgLog(LOG_WARN, "auth_discover_root_servers: bad source IP in response " + dest)
+      continue
+    except dns.exception.DNSException as e:
+      dbgLog(LOG_WARN, "auth_discover_root_servers: general dns error " + dest + " " + str(e))
+      continue
+
+    for rr in primer.section_from_number(3): # 3 == Additional
+      name = rr.to_text().split()[0].strip('.')
+      ip = rr.to_text().split()[4]
+
+      if name not in [disc['dn'] for disc in discovered]:
+        discovered.append({'dn': name})
+
+      if ipaddress.ip_address(ip).version == 4:
+        for disc in discovered:
+          if disc['dn'] == name:
+            disc['v4'] = ip
+      else:
+        for disc in discovered:
+          if disc['dn'] == name:
+            disc['v6'] = ip
+
+    if len(discovered) == len(STATIC_SERVERS):
+      done = True
+      for disc in discovered:
+        if 'v4' not in disc or 'v6' not in disc:
+          done = False
+
+      if done:
+        rv = []
+        for disc in discovered:
+          rv.append(RootServer(disc['dn'], disc['v4'], disc['v6']))
+        return rv
+
+  return None
 
 # Returns the type of system we are running on
 # Returns either: linux, bsd, darwin, win32, cygwin
@@ -636,8 +685,6 @@ ap.add_argument('-o', '--out-file', type=str, action='store', default='',
                   dest='out_file', help='Filename for output')
 ap.add_argument('-q', '--query-timeout', type=int, action='store', default=10,
                   dest='query_timeout', help='DNS query timeout in seconds')
-ap.add_argument('-r', '--root-hints', type=str, action='store', default='named.cache',
-                  dest='root_hints', help='Root hints file')
 ap.add_argument('-t', '--num-tests', type=int, action='store', default=2,
                   dest='num_tests', help='Number of test cycles per-TLD')
 ap.add_argument('-v', '--verbose', action='count', default=0,
@@ -664,6 +711,7 @@ args = ap.parse_args()
 LOG_LEVEL = min(args.verbose, LOG_DEBUG)
 dbgLog(LOG_INFO, "Begin Execution")
 fancy_output(0, "\rBegin Execution")
+random.seed()
 
 if args.no_v4 and args.no_v6:
   death("Both IPv4 and IPv6 disabled")
@@ -675,9 +723,13 @@ SYS_TYPE = get_sys_type() # Determine what the OS is
 dbgLog(LOG_INFO, "SYS_TYPE:" + SYS_TYPE)
 
 # Find our root servers
-ROOT_SERVERS = discover_root_servers()
+ROOT_SERVERS = local_discover_root_servers()
 if not ROOT_SERVERS:
-  ROOT_SERVERS = parse_root_hints(args.root_hints) # Get our list of root servers
+  dbgLog(LOG_WARN, "Local resolution of root servers failed, attempting direct resolution.")
+  ROOT_SERVERS = auth_discover_root_servers() #parse_root_hints(args.root_hints) # Get our list of root servers
+if not ROOT_SERVERS:
+  death("Unable to contact any root servers")
+
 dbgLog(LOG_DEBUG, "Found " + str(len(ROOT_SERVERS)) + " root servers")
 fancy_output(1, "\rFound " + str(len(ROOT_SERVERS)) + " root servers")
 
@@ -695,7 +747,6 @@ if not args.no_v6:
 if args.no_v4 and not IPV6_SUPPORT:
   death("IPv4 disabled and IPv6 not configured")
 
-random.seed()
 # This ranges from 'aa' to 'zz'
 tlds = find_tlds(chr(random.randint(97, 122)) + chr(random.randint(97, 122)), args.num_tlds)
 dbgLog(LOG_DEBUG, "Found " + str(len(tlds)) + " TLDs")
