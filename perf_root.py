@@ -545,10 +545,11 @@ def local_discover_root_servers():
 
 # Returns list of RSIs if possible, otherwise returns None
 # Uses STATIC_SERVERS to find all servers
-def auth_discover_root_servers():
+# Takes a function to use for querying(udp or tcp)
+def auth_discover_root_servers(fn):
   random.shuffle(STATIC_SERVERS)
 
-  # dnspython may not return the full priming response in one query
+  # Because 'reasons' we may not get the full priming response in one query
   # So we construct it from multiple queries just to be sure
   discovered = []
   for server in STATIC_SERVERS:
@@ -557,7 +558,7 @@ def auth_discover_root_servers():
     dbgLog(LOG_DEBUG, "auth_discover_root_servers: Trying destination:" + dest)
 
     try:
-      primer = dns.query.tcp(query, dest, timeout=args.query_timeout)
+      primer = fn(query, dest, timeout=args.query_timeout)
       dbgLog(LOG_DEBUG, repr(primer.section_from_number(3)))
     except dns.exception.Timeout:
       dbgLog(LOG_WARN, "auth_discover_root_servers: query timeout " + dest)
@@ -722,8 +723,11 @@ dbgLog(LOG_INFO, "SYS_TYPE:" + SYS_TYPE)
 # Find our root servers
 ROOT_SERVERS = local_discover_root_servers()
 if not ROOT_SERVERS:
-  dbgLog(LOG_WARN, "Local resolution of root servers failed, attempting direct resolution.")
-  ROOT_SERVERS = auth_discover_root_servers() #parse_root_hints(args.root_hints) # Get our list of root servers
+  dbgLog(LOG_WARN, "Local resolution of root servers failed, attempting direct resolution via TCP.")
+  ROOT_SERVERS = auth_discover_root_servers(dns.query.tcp)
+if not ROOT_SERVERS:
+  dbgLog(LOG_WARN, "Direct TCP queries to root servers failed, attempting direct resolution via UDP.")
+  ROOT_SERVERS = auth_discover_root_servers(dns.query.udp)
 if not ROOT_SERVERS:
   death("Unable to contact any root servers")
 
