@@ -479,7 +479,7 @@ def trace_route(binary, ip):
   time.sleep(random.uniform(1, args.num_threads))
 
   rv = []
-  cmd = binary + " -n -p 53 " + str(ip)
+  cmd = binary + " -n -p 53 -m 32 " + str(ip)
   dbgLog(LOG_INFO, "trace_route:" + cmd)
   try:
     proc = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True)
