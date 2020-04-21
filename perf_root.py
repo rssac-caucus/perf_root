@@ -463,7 +463,7 @@ def trace_route(binary, ip):
     return []
 
   # Delay start time to prevent packet drops at first gateway
-  time.sleep(random.uniform(0, args.num_threads * 2))
+  time.sleep(random.uniform(1, args.num_threads))
 
   rv = []
   cmd = binary + " -n " + str(ip)
@@ -663,8 +663,7 @@ signal.signal(signal.SIGILL, euthanize)
 #signal.signal(signal.CTRL_C_EVENT, euthanize)
 
 # CLI options
-args_epilog = "If --out-file is not specified stdout is used. \
-A high --threads value can cause dropped traceroute probes at first next-hop."
+args_epilog = "If --out-file is not specified stdout is used."
 
 ap = argparse.ArgumentParser(description = 'Test DNS Root Servers',
                                formatter_class = argparse.ArgumentDefaultsHelpFormatter,
@@ -682,7 +681,7 @@ ap.add_argument('-t', '--num-tests', type=int, action='store', default=2,
 ap.add_argument('-v', '--verbose', action='count', default=0,
                   dest='verbose', help='Verbose output, repeat for increased verbosity')
 
-ap.add_argument('--threads', type=int, action='store', default=4, 
+ap.add_argument('--threads', type=int, action='store', default=6, choices=[1,2,3,4,5,6],
                   dest='num_threads', help='Number of threads to run concurrently')
 
 ap.add_argument('--no-tcp', action='store_true', default=False, # Toggle UDP/TCP testing off
