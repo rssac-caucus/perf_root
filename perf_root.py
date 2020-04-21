@@ -141,9 +141,22 @@ class RootServer():
     rv['rsi'] = self.name
     rv['ipv4'] = self.times_v4
     rv['ipv6'] = self.times_v6
+
+    self.anonymize_traceroutes()
     rv['traceroute_v4'] = self.traceroute_v4
     rv['traceroute_v6'] = self.traceroute_v6
     return json.dumps(rv)
+
+  # Anonymizes IP addresses in traceroutes
+  # Currently only replaces private IP space with generic stub IP
+  def anonymize_traceroutes(self):
+    for ii, hops in enumerate(self.traceroute_v4):
+      self.traceroute_v4[ii] = \
+        ['10.0.0.1' if ipaddress.ip_address(hop).is_private else hop for hop in self.traceroute_v4[ii]]
+
+    for ii, hops in enumerate(self.traceroute_v6):
+      self.traceroute_v6[ii] = \
+        ['fe80::1' if ipaddress.ip_address(hop).is_private else hop for hop in self.traceroute_v6[ii]]
 
 ####################
 # GLOBAL FUNCTIONS #
@@ -447,7 +460,7 @@ def trace_route(binary, ip):
   # Returns list of gateways returning probes
   # Returns None if no probes sent
   # Returns empty list if no probes received
-  def parse_line(line): 
+  def parse_line(line):
     gateways = []
     for token in line.strip().split()[1:]:
       try:
