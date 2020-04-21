@@ -601,24 +601,23 @@ def auth_discover_root_servers(fn):
   return None
 
 # Returns the type of system we are running on
-# Returns either: linux, bsd, darwin, win32, cygwin
+# Returns either: linux, fbsd, nbsd, obsd, darwin, win32, cygwin
+# For now we only support linux and fbsd
 def get_sys_type():
-  if sys.platform.lower().startswith('freebsd'):
-    return 'bsd'
-  elif sys.platform.lower().startswith('netbsd'):
-    return 'bsd'
-  elif sys.platform.lower().startswith('openbsd'):
-    return 'bsd'
-  elif sys.platform.lower().startswith('linux'):
+  if sys.platform.lower().startswith('linux'):
     return 'linux'
+  elif sys.platform.lower().startswith('freebsd'):
+    return 'fbsd'
+  elif sys.platform.lower().startswith('netbsd'):
+    return 'nbsd'
+  elif sys.platform.lower().startswith('openbsd'):
+    return 'obsd'
   elif sys.platform.lower().startswith('darwin'):
     return 'darwin'
   elif sys.platform.lower().startswith('win32'):
-    death('Unsupported platform win32')
-    #return 'win32'
+    return 'win32'
   elif sys.platform.lower().startswith('cygwin'):
-    death('Unsupported platform cygwin')
-    #return 'cygwin'
+    return 'cygwin'
 
 # Returns the location of an executable binary
 # Returns None if binary cannot be found
@@ -630,18 +629,13 @@ def find_binary(fn):
         return True
     return False
 
-  if SYS_TYPE == 'bsd' or SYS_TYPE == 'linux' or SYS_TYPE == 'darwin':
+  if SYS_TYPE == 'fbsd' or SYS_TYPE == 'linux':
     for directory in ['/usr/bin/', '/usr/sbin/', '/bin/', '/sbin/', '/usr/local/bin/', '/usr/local/sbin/']:
       if test(directory + fn):
         return directory + fn
     return None
 
-  elif SYS_TYPE == 'win32':
-    death('Unsupported platform win32')
-
-  elif SYS_TYPE == 'cygwin':
-    death('Unsupported platform cygwin')
-
+  death('Unsupported platform' + SYS_TYPE)
 
 ###################
 # BEGIN EXECUTION #
@@ -754,13 +748,14 @@ dbgLog(LOG_DEBUG, "Found " + str(len(tlds)) + " TLDs")
 fancy_output(1, "\rFound " + str(len(tlds)) + " TLDs")
 
 # Our pool of worker threads/processes
-# signal catching is broken on OpenBSD if we use threads
-# OpenBSD is still somewhat broken if we use processes
-# For now we can only support linux
+# signal catching is broken on OpenBSD if we use threads(ThreadPool) or processes(Pool)
+# Keeping this IF stmt here as I suspect different platforms will break differently with this
 if SYS_TYPE == 'linux':
   pool = multiprocessing.pool.ThreadPool(processes=args.num_threads)
-elif SYS_TYPE == 'bsd':
-  pool = multiprocessing.pool.Pool(processes=args.num_threads)
+elif SYS_TYPE == 'fbsd':
+  pool = multiprocessing.pool.ThreadPool(processes=args.num_threads)
+else:
+  death('Unsupported platform' + SYS_TYPE)
 
 # Perform IPv4 tests
 if not args.no_v4:
