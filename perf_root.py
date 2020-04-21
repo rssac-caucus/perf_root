@@ -150,11 +150,11 @@ class RootServer():
   # Anonymizes IP addresses in traceroutes
   # Currently only replaces private IP space with generic stub IP
   def anonymize_traceroutes(self):
-    for ii, hops in enumerate(self.traceroute_v4):
+    for ii in range(len(self.traceroute_v4)):
       self.traceroute_v4[ii] = \
         ['10.0.0.1' if ipaddress.ip_address(hop).is_private else hop for hop in self.traceroute_v4[ii]]
 
-    for ii, hops in enumerate(self.traceroute_v6):
+    for ii in range(len(self.traceroute_v6)):
       self.traceroute_v6[ii] = \
         ['fe80::1' if ipaddress.ip_address(hop).is_private else hop for hop in self.traceroute_v6[ii]]
 
@@ -479,7 +479,7 @@ def trace_route(binary, ip):
   time.sleep(random.uniform(1, args.num_threads))
 
   rv = []
-  cmd = binary + " -n " + str(ip)
+  cmd = binary + " -n -p 53 " + str(ip)
   dbgLog(LOG_INFO, "trace_route:" + cmd)
   try:
     proc = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True)
@@ -559,6 +559,7 @@ def local_discover_root_servers():
 # Returns list of RSIs if possible, otherwise returns None
 # Uses STATIC_SERVERS to find all servers
 # Takes a function to use for querying(udp or tcp)
+# TODO: Get working with IPv6
 def auth_discover_root_servers(fn):
   random.shuffle(STATIC_SERVERS)
 
@@ -676,7 +677,8 @@ signal.signal(signal.SIGILL, euthanize)
 #signal.signal(signal.CTRL_C_EVENT, euthanize)
 
 # CLI options
-args_epilog = "If --out-file is not specified stdout is used."
+args_epilog = "If --out-file is not specified stdout is used. \
+UDP port 53 is used for traceroute probes."
 
 ap = argparse.ArgumentParser(description = 'Test DNS Root Servers',
                                formatter_class = argparse.ArgumentDefaultsHelpFormatter,
