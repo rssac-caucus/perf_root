@@ -859,6 +859,7 @@ if not args.no_v6 and IPV6_SUPPORT:
     maximum = str(max(times_v6))[:SIG_CHARS]
     fancy_output(args.delay, "\rIPv6 DNS test cycle " + str(ii) + " min:" + minimum + " max:" + maximum + " avg:" + mean)
 
+pool.close()
 fancy_output(0, "\rFinished testing")
 print()
 
