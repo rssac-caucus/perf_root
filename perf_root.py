@@ -435,19 +435,25 @@ def timed_query(fn, tld, ip):
   try:
     fn(query, str(ip), timeout=args.query_timeout)
   except dns.exception.Timeout:
-    dbgLog(LOG_WARN, "timed_query: timeout qname:" + tld + " ip:" + str(ip) + ":" + fn.__name__)
+    dbgLog(LOG_WARN, "timed_query:" + fn.__name__ + " timeout qname:" + tld + " ip:" + str(ip))
     return -1
   except dns.query.BadResponse:
-    dbgLog(LOG_WARN, "timed_query: bad response qname:" + tld + " ip:" + str(ip) + ":" + fn.__name__)
+    dbgLog(LOG_WARN, "timed_query:" + fn.__name__ + " bad response qname:" + tld + " ip:" + str(ip))
     return -1
   except dns.query.UnexpectedSource:
-    dbgLog(LOG_WARN, "timed_query: bad source IP in response qname:" + tld + " ip:" + str(ip) + ":" + fn.__name__)
+    dbgLog(LOG_WARN, "timed_query:" + fn.__name__ + " bad source IP in response qname:" + tld + " ip:" + str(ip))
     return -1
   except dns.exception.DNSException as e:
-    dbgLog(LOG_WARN, "timed_query: general dns error qname:" + tld + " ip:" + str(ip) + ":" + fn.__name__)
+    dbgLog(LOG_WARN, "timed_query:" + fn.__name__ + " general dns error qname:" + tld + " ip:" + str(ip))
+    return -1
+  except ConnectionError as e:
+    dbgLog(LOG_WARN, "timed_query:" + fn.__name__ + " Connection error qname:" + tld + " ip:" + str(ip) + ":" + str(e))
+    return -1
+  except OSError as e:
+    dbgLog(LOG_WARN, "timed_query:" + fn.__name__ + " OSError error qname:" + tld + " ip:" + str(ip) + ":" + str(e))
     return -1
 
-  dbgLog(LOG_DEBUG, "timed_query " + tld + " " + str(ip) + " " + str(time.perf_counter() - start_time))
+  dbgLog(LOG_DEBUG, "timed_query:" + fn.__name__ + " " + tld + " " + str(ip) + " " + str(time.perf_counter() - start_time))
   return time.perf_counter() - start_time
 
 # Perform a traceroute
