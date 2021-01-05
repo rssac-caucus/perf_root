@@ -540,7 +540,7 @@ def local_discover_root_servers():
     return None
 
   try:
-    resp = d.query('.', 'NS')
+    resp = d.resolve('.', 'NS', search=True)
   except dns.exception.DNSException as e:
     dbgLog(LOG_WARN, "Failed to query local resolver for . " + repr(e))
     return None
@@ -550,13 +550,13 @@ def local_discover_root_servers():
   rv = []
   for name in sorted(names):
     try:
-      resp_a = d.query(name, 'A')
+      resp_a = d.resolve(name, 'A', search=True)
     except dns.exception.DNSException as e:
       dbgLog(LOG_WARN, "Failed querying A record for " + name + " " + repr(e))
       return None
 
     try:
-      resp_aaaa = d.query(name, 'AAAA')
+      resp_aaaa = d.resolve(name, 'AAAA', search=True)
     except dns.exception.DNSException as e:
       dbgLog(LOG_WARN, "Failed querying AAAA record for " + name + " " + repr(e))
       return None
