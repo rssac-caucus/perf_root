@@ -61,6 +61,9 @@ DNS_MAX_QUERIES = 5 # Number of query retries before we give up
 ROOT_SERVERS = [] # Our list of DNS root servers
 DYING = False # Are we in the process of dying
 
+# Where we look for executable binaries
+SEARCH_PATH = ['/usr/bin/', '/usr/sbin/', '/bin/', '/sbin/', '/usr/local/bin/', '/usr/local/sbin/']
+
 STATIC_SERVERS = [ # Only used to discover actual RSIs if local recursive resolution fails
 {'a': '198.41.0.4', 'aaaa': '2001:503:ba3e::2:30'},
 {'a': '199.9.14.201', 'aaaa': '2001:500:200::b'},
@@ -617,7 +620,7 @@ def auth_discover_root_servers(fn):
 
       if done:
         return [RootServer(disc['dn'], disc['v4'], disc['v6']) for disc in discovered]
-      
+
   return None
 
 # Returns the type of system we are running on
@@ -650,12 +653,12 @@ def find_binary(fn):
     return False
 
   if SYS_TYPE == 'fbsd' or SYS_TYPE == 'linux':
-    for directory in ['/usr/bin/', '/usr/sbin/', '/bin/', '/sbin/', '/usr/local/bin/', '/usr/local/sbin/']:
+    for directory in SEARCH_PATH:
       if test(directory + fn):
         return directory + fn
     return None
 
-  death('Unsupported platform' + SYS_TYPE)
+  death('Unsupported platform ' + SYS_TYPE)
 
 ###################
 # BEGIN EXECUTION #
@@ -761,6 +764,15 @@ if not args.no_v6:
 
 if args.no_v4 and not IPV6_SUPPORT:
   death("IPv4 disabled and IPv6 not configured")
+
+# Die if user requested traceroute and binaries cannot be found
+if not args.no_traceroute:
+  if not args.no_v4 and not find_binary('traceroute'):
+    dbgLog(LOG_DEBUG, "No traceroute binary found in " + repr(SEARCH_PATH))
+    death("IPv4 traceroute requested but traceroute binary not found, try running with --no-traceroute option")
+  if not args.no_v6 and not find_binary('traceroute6'):
+    dbgLog(LOG_DEBUG, "No traceroute6 binary found in " + repr(SEARCH_PATH))
+    death("IPv6 traceroute requested but traceroute6 binary not found, try running with --no-traceroute option")
 
 # This ranges from 'aa' to 'zz'
 tlds = find_tlds(chr(random.randint(97, 122)) + chr(random.randint(97, 122)), args.num_tlds)
