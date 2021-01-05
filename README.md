@@ -34,7 +34,7 @@ Number of tests per-TLD (default: 2)
 ``-v, --verbose``
 Verbose output, repeat for increased verbosity
 
-``  --threads {1,2,3,4,5,6}``
+``--threads {1,2,3,4,5,6}``
 Number of threads to run concurrently (default: 6)
 
 ``--no-tcp``
@@ -48,6 +48,9 @@ Turn off IPv4 testing
 
 ``--no-ipv6``
 Turn off IPv6 testing
+
+``--no-traceroute``
+Turn off traceroute for both IPv4 and IPv6
 
 If --out-file is not specified stdout is used. UDP port 53 is used for
 traceroute probes.
