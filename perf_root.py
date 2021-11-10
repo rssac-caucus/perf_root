@@ -58,6 +58,7 @@ SIG_CHARS = 7 # How many significant characters to display in fancy output
 SYS_TYPE = '' # Enumerated type of system we're running on: linux, bsd, darwin, win32, cygwin
 TRACEROUTE_NUM_TIMEOUTS = 5 # Number of consecutive timed out traceroute probes we tolerate before giving up
 DNS_MAX_QUERIES = 5 # Number of query retries before we give up
+TLDS_MAX = 100 # Max TLDs we will query
 ROOT_SERVERS = [] # Our list of DNS root servers
 DYING = False # Are we in the process of dying
 
@@ -247,6 +248,23 @@ def fancy_output(delay, ss):
 
   sys.stdout.flush()
   time.sleep(delay)
+
+# Takes a string
+# Returns True if it is a valid DNS label, otherwise False
+def is_valid_dns_label(lab):
+  if not lab.isascii():
+    return False
+
+  if not lab.replace('-', '').isalnum():
+    return False
+
+  if lab.lstrip('0123456789-') != lab:
+    return False
+
+  if len(lab) < 2 or len(lab) > 63:
+    return False
+
+  return True
 
 # Send a single walk query and return a dnspython response message
 def send_walk_query(qstr):
@@ -694,14 +712,14 @@ ap = argparse.ArgumentParser(description = 'Test DNS Root Servers',
                                epilog = args_epilog)
 ap.add_argument('-d', '--delay', type=float, action='store', default=0.05,
                   dest='delay', help='Delay between each test cycle in seconds')
-ap.add_argument('-n', '--num-tlds', type=int, action='store', default=10,
-                  dest='num_tlds', help='Number of TLDs to query for')
+ap.add_argument('-n', '--num-tests', type=int, action='store', default=2,
+                  dest='num_tests', help='Number of test cycles per-TLD')
 ap.add_argument('-o', '--out-file', type=str, action='store', default='',
                   dest='out_file', help='Filename for output')
 ap.add_argument('-q', '--query-timeout', type=int, action='store', default=10,
                   dest='query_timeout', help='DNS query timeout in seconds')
-ap.add_argument('-t', '--num-tests', type=int, action='store', default=2,
-                  dest='num_tests', help='Number of test cycles per-TLD')
+ap.add_argument('-t', '--tlds', type=str, action='store', default='com',
+                  dest='tlds', help='Comma separated list of TLDs to query, or number between 1 and ' + str(TLDS_MAX) + ' for random TLDs')
 ap.add_argument('-v', '--verbose', action='count', default=0,
                   dest='verbose', help='Verbose output, repeat for increased verbosity')
 
@@ -774,8 +792,20 @@ if not args.no_traceroute:
     dbgLog(LOG_DEBUG, "No traceroute6 binary found in " + repr(SEARCH_PATH))
     death("IPv6 traceroute requested but traceroute6 binary not found, try running with --no-traceroute option")
 
-# This ranges from 'aa' to 'zz'
-tlds = find_tlds(chr(random.randint(97, 122)) + chr(random.randint(97, 122)), args.num_tlds)
+# Make our list of TLDs
+if not args.tlds.isascii():
+  death("Invalid --tlds argument")
+if args.tlds.isdecimal():
+  if int(args.tlds) < 1 or int(args.tlds) > TLDS_MAX:
+    death("--tlds out of bounds")
+  else:
+    # This ranges from 'aa' to 'zz'
+    tlds = find_tlds(chr(random.randint(97, 122)) + chr(random.randint(97, 122)), int(args.tlds))
+else:
+  tlds = args.tlds.replace('.', '').lower().split(',')
+  if not all(map(is_valid_dns_label, tlds)):
+    death("--tlds contains invalid TLD")
+
 dbgLog(LOG_DEBUG, "Found " + str(len(tlds)) + " TLDs")
 fancy_output(1, "\rFound " + str(len(tlds)) + " TLDs")
 
