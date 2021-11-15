@@ -60,7 +60,8 @@ TRACEROUTE_NUM_TIMEOUTS = 5 # Number of consecutive timed out traceroute probes 
 DNS_MAX_QUERIES = 5 # Number of query retries before we give up
 TLDS_MAX = 100 # Max TLDs we will query
 ROOT_SERVERS = [] # Our list of DNS root servers
-DYING = False # Are we in the process of dying
+OUTPUT = {} # Top-level dict to encode into JSON and output
+DYING = False # Are we in the process of dying?
 
 # Where we look for executable binaries
 SEARCH_PATH = ['/usr/bin/', '/usr/sbin/', '/bin/', '/sbin/', '/usr/local/bin/', '/usr/local/sbin/']
@@ -139,17 +140,17 @@ class RootServer():
         rv += sum(list(self.times_v6[proto].values()), [])
       return rv
 
-  # Convert this object to JSON and return it
-  def to_json(self):
+  # Convert this object to a dict and return it
+  def to_dict(self):
     rv = {}
     rv['rsi'] = self.name
     rv['ipv4'] = self.times_v4
     rv['ipv6'] = self.times_v6
 
-    self.anonymize_traceroutes()
+    #self.anonymize_traceroutes()
     rv['traceroute_v4'] = self.traceroute_v4
     rv['traceroute_v6'] = self.traceroute_v6
-    return json.dumps(rv)
+    return rv
 
   # Anonymizes IP addresses in traceroutes
   # Currently only replaces private IP space with generic stub IP
@@ -819,6 +820,9 @@ elif SYS_TYPE == 'fbsd':
 else:
   death('Unsupported platform' + SYS_TYPE)
 
+OUTPUT['timestamps'] = {}
+OUTPUT['timestamps']['start'] = datetime.datetime.utcnow().isoformat('T', timespec='seconds') + 'Z'
+
 # Perform IPv4 tests
 if not args.no_v4:
   ipv4_addresses = [rsi.ipv4 for rsi in ROOT_SERVERS]
@@ -901,23 +905,23 @@ if not args.no_v6 and IPV6_SUPPORT:
     maximum = str(max(times_v6))[:SIG_CHARS]
     fancy_output(args.delay, "\rIPv6 DNS test cycle " + str(ii) + " min:" + minimum + " max:" + maximum + " avg:" + mean)
 
+OUTPUT['timestamps']['end'] = datetime.datetime.utcnow().isoformat('T', timespec='seconds') + 'Z'
 pool.close()
 fancy_output(0, "\rFinished testing")
 print()
 
 # Create output and write it
-output = ''
-for rsi in ROOT_SERVERS:
-  output += rsi.to_json()
+OUTPUT['RSIs'] = [rsi.to_dict() for rsi in ROOT_SERVERS]
+out_str = json.dumps(OUTPUT, indent=2)
 
 if len(args.out_file) > 0:
   try:
     fh = open(args.out_file, 'w')
-    fh.write(output)
+    fh.write(out_str)
     fh.close()
   except OSError:
     death("Unable to write to " + args.out_file)
 else:
-  print(output)
+  print(out_str)
 
 sys.exit(0)
