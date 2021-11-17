@@ -755,6 +755,7 @@ if args.no_udp and args.no_tcp:
 
 SYS_TYPE = get_sys_type() # Determine what the OS is
 dbgLog(LOG_INFO, "SYS_TYPE:" + SYS_TYPE)
+OUTPUT['sys_type'] = SYS_TYPE
 
 # Find our root servers
 ROOT_SERVERS = local_discover_root_servers()
