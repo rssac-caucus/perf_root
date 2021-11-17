@@ -713,7 +713,7 @@ ap = argparse.ArgumentParser(description = 'Test DNS Root Servers',
                                epilog = args_epilog)
 ap.add_argument('-d', '--delay', type=float, action='store', default=0.05,
                   dest='delay', help='Delay between each test cycle in seconds')
-ap.add_argument('-n', '--num-tests', type=int, action='store', default=2,
+ap.add_argument('-n', '--num-tests', type=int, action='store', default=10,
                   dest='num_tests', help='Number of test cycles per-TLD')
 ap.add_argument('-o', '--out-file', type=str, action='store', default='',
                   dest='out_file', help='Filename for output')
