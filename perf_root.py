@@ -20,20 +20,20 @@
 import argparse
 import datetime
 import dns.exception
+import dns.flags
 import dns.message
 import dns.resolver
 import dns.rcode
 import dns.rdataclass
 import dns.rdatatype
 import dns.query
-#import hashlib
+from enum import Enum, auto
 import ipaddress
 import itertools
 import json
 import os
 import multiprocessing.pool
 import random
-#import re
 import signal
 import socket
 import statistics
@@ -82,70 +82,83 @@ STATIC_SERVERS = [ # Only used to discover actual RSIs if local recursive resolu
 {'a': '202.12.27.33', 'aaaa': '2001:dc3::35'}
 ]
 
+# These correspond to the query kinds from RSSAC057 section 3.2
+# https://www.icann.org/en/system/files/files/rssac-057-09sep21-en.pdf
+class QKIND(Enum):
+  HOST = auto() # 3.2.1
+  NS = auto() # 3.2.2
+  DS = auto() # 3.2.3
+  OPEN = auto() # Open resolvers
+
 ###########
 # Classes #
 ###########
-class RootServer():
+class Server():
   def __init__(self, name, ipv4, ipv6):
     self.name = name
     self.ipv4 = ipv4
     self.ipv6 = ipv6
-    self.times_v4 = {}
-    self.times_v6 = {}
+
+
+class OpenServer(Server):
+  def __init__(self, name, ipv4, ipv6):
+    Server.__init__(self, name, ipv4, ipv6)
+    self.queries = {'ipv4': [], 'ipv6': []}
+
+  def __repr__(self):
+    return "name:" + self.name + " ipv4:" + str(self.ipv4) + " ipv6:" + str(self.ipv6) + " queries:" + repr(self.queries)
+
+  def add_query(self, ipv, qtime, data):
+    entry = [qtime, data]
+    self.queries[ipv].append(entry)
+
+  # Convert this object to a dict and return it
+  def to_dict(self):
+    rv = {}
+    rv['open_resolver'] = self.name
+    rv['ipv4'] = self.ipv4
+    rv['ipv6'] = self.ipv6
+    rv['queries'] = self.queries
+
+
+class RootServer(Server):
+  def __init__(self, name, ipv4, ipv6):
+    Server.__init__(self, name, ipv4, ipv6)
+
+    self.queries = {}
+    for qkind in QKIND:
+      if qkind == QKIND.OPEN:
+        continue
+      self.queries[qkind] = {'ipv4': {'udp':{}, 'tcp':{}}, 'ipv6':{'udp':{}, 'tcp':{}}}
+
+    # For now we only do UDP traceroutes
     self.traceroute_v4 = []
     self.traceroute_v6 = []
 
-  def __repr__(self):
-    return "name:" + self.name + " ipv4:" + str(self.ipv4) + " ipv6:" + str(self.ipv6) + " times_v4:" + repr(self.times_v4) + " times_v6:" + repr(self.times_v6)
+  def __repr__(self): #TODO: fix
+    return "name:" + self.name + " ipv4:" + str(self.ipv4) + " ipv6:" + str(self.ipv6) + " queries:" + repr(self.queriess) + \
+      " trace_v4:" + repr(self.traceoute_v4) + " trace_v6:" + repr(self.traceroute_v6)
 
-  # Add a testing time for IPv4
-  # Takes a protocol(udp/tcp), TLD and a time
-  def add_time_v4(self, proto, tld, time):
-    if not proto in self.times_v4:
-      self.times_v4[proto] = {}
-
-    if not tld in self.times_v4[proto]:
-      self.times_v4[proto][tld] = [time]
-    else:
-      self.times_v4[proto][tld].append(time)
-
-  # Add a testing time for IPv6
-  # Takes a protocol(udp/tcp), TLD and a time
-  def add_time_v6(self, proto, tld, time):
-    if not proto in self.times_v6:
-      self.times_v6[proto] = {}
-
-    if not tld in self.times_v6[proto]:
-      self.times_v6[proto][tld] = [time]
-    else:
-      self.times_v6[proto][tld].append(time)
-
-  # Return list of all IPv4 testing times
-  def get_flattened_times_v4(self):
-    if len(self.times_v4) == 0:
-      return [0.0]
-    else:
-      rv = []
-      for proto in self.times_v4:
-        rv += sum(list(self.times_v4[proto].values()), [])
-      return rv
-
-  # Return list of all IPv6 testing times
-  def get_flattened_times_v6(self):
-    if len(self.times_v6) == 0:
-      return [0.0]
-    else:
-      rv = []
-      for proto in self.times_v6:
-        rv += sum(list(self.times_v6[proto].values()), [])
-      return rv
+  # Add a test result for DNS query
+  # TODO: Do some error checking on passed values
+  def add_query(self, qkind, ipv, proto, tld, qtime, data):
+    if not tld in self.queries[qkind][ipv][proto]:
+      self.queries[qkind][ipv][proto][tld] = []
+    entry = [qtime, data]
+    self.queries[qkind][ipv][proto][tld].append(entry)
 
   # Convert this object to a dict and return it
   def to_dict(self):
     rv = {}
     rv['rsi'] = self.name
-    rv['ipv4'] = self.times_v4
-    rv['ipv6'] = self.times_v6
+    rv['ipv4'] = self.ipv4
+    rv['ipv6'] = self.ipv6
+
+    rv['queries'] = {} # Convert Enum into string for output
+    for qkind in QKIND:
+      if qkind == QKIND.OPEN:
+        continue
+      rv['queries'][qkind.name] = self.queries[qkind]
 
     #self.anonymize_traceroutes()
     rv['traceroute_v4'] = self.traceroute_v4
@@ -249,6 +262,14 @@ def fancy_output(delay, ss):
 
   sys.stdout.flush()
   time.sleep(delay)
+
+# Prints fancy_output for stats
+# Takes a delay, a prefix string, and a list of numeric values
+def fancy_stats(delay, prefix, vals):
+  median = str(statistics.median(vals))[:SIG_CHARS]
+  minimum = str(min(vals))[:SIG_CHARS]
+  maximum = str(max(vals))[:SIG_CHARS]
+  fancy_output(delay, "\r" + prefix + " min:" + minimum + " max:" + maximum + " median:" + median)
 
 # Takes a string
 # Returns True if it is a valid DNS label, otherwise False
@@ -446,37 +467,50 @@ def dn_dec(dn):
         return dn[:-1] + chr(ord(dn[-1:]) - 1)
 
 # Time the query and response to a root server IP address(v4/v6)
-# Takes a function for the type of query(TCP/UDP), a TLD to query, and an IP address
-# Returns time in seconds as float and -1 on failure
-def timed_query(fn, tld, ip):
+# Takes a function for the type of query(TCP/UDP), a TLD to query, an IP address, and a QKIND
+# Returns time in seconds as float and resultant data
+# If failure returns -1 and string description of failure
+def timed_query(fn, tld, ip, qkind=QKIND.NS): # TODO: Remove default value when finished developing this feature
   if DYING:
-    return -1
+    return -1, 'process dying'
 
-  query = dns.message.make_query(tld, 'NS')
-  start_time = time.perf_counter()
+  if qkind is QKIND.HOST:
+    query = dns.message.make_query('hostname.bind', 'TXT', rdclass=dns.rdataclass.CH, use_edns=False)
+  elif qkind is QKIND.NS:
+    query = dns.message.make_query(tld, 'NS', rdclass=dns.rdataclass.IN, flags=dns.flags.CD, use_edns=True)
+  elif qkind is QKIND.DS:
+    query = dns.message.make_query(tld, 'DS', rdclass=dns.rdataclass.IN, flags=dns.flags.CD, ednsflags=0, use_edns=True)
+  elif qkind is QKIND.OPEN:
+    query = dns.message.make_query('.', 'NS', rdclass=dns.rdataclass.IN, use_edns=False)
+  else:
+    dbgLog(LOG_ERROR, "timed_query:" + fn.__name__ + " invalid query kind ")
+    return -1, 'invalid query kind'
+
+  start_time = time.monotonic()
   try:
-    fn(query, str(ip), timeout=args.query_timeout)
+    response = fn(query, str(ip), timeout=args.query_timeout)
   except dns.exception.Timeout:
     dbgLog(LOG_WARN, "timed_query:" + fn.__name__ + " timeout qname:" + tld + " ip:" + str(ip))
-    return -1
+    return -1, 'query timeout'
   except dns.query.BadResponse:
     dbgLog(LOG_WARN, "timed_query:" + fn.__name__ + " bad response qname:" + tld + " ip:" + str(ip))
-    return -1
+    return -1, 'bad response'
   except dns.query.UnexpectedSource:
     dbgLog(LOG_WARN, "timed_query:" + fn.__name__ + " bad source IP in response qname:" + tld + " ip:" + str(ip))
-    return -1
+    return -1, 'bad source IP in response'
   except dns.exception.DNSException as e:
     dbgLog(LOG_WARN, "timed_query:" + fn.__name__ + " general dns error qname:" + tld + " ip:" + str(ip))
-    return -1
+    return -1, 'general dns error'
   except ConnectionError as e:
     dbgLog(LOG_WARN, "timed_query:" + fn.__name__ + " Connection error qname:" + tld + " ip:" + str(ip) + ":" + str(e))
-    return -1
+    return -1, 'connection error'
   except OSError as e:
     dbgLog(LOG_WARN, "timed_query:" + fn.__name__ + " OSError error qname:" + tld + " ip:" + str(ip) + ":" + str(e))
-    return -1
+    return -1, 'OSError error'
 
-  dbgLog(LOG_DEBUG, "timed_query:" + fn.__name__ + " " + tld + " " + str(ip) + " " + str(time.perf_counter() - start_time))
-  return time.perf_counter() - start_time
+  qtime = time.monotonic() - start_time
+  dbgLog(LOG_DEBUG, "timed_query:" + fn.__name__ + " " + tld + " " + str(ip) + " " + str(qtime))
+  return qtime, 'some data'
 
 # Perform a traceroute
 # Takes a traceroute binary location(type:string) and an IP address(type:ipaddress)
@@ -837,33 +871,29 @@ if not args.no_v4:
       lengths.append(len(trace))
       rsi.traceroute_v4 = trace
 
-    median = str(statistics.median(lengths))
-    minimum = str(min(lengths))
-    maximum = str(max(lengths))
-    fancy_output(5, "\rtraceroute hops min:" + minimum + " max:" + maximum + " median:" + median)
+    fancy_stats(5, "\rtraceroute hops ", lengths)
 
   fancy_output(0, "\rRunning IPv4 DNS queries with " + str(args.num_threads) + " threads")
   dbgLog(LOG_INFO, "Running IPv4 DNS queries with " + str(args.num_threads) + " threads")
   for ii in range(1, args.num_tests + 1):
     times_v4 = []
     if not args.no_udp:
-      udp_times = pool.starmap(timed_query, [[dns.query.udp, tld, ip] for tld, ip in itertools.product(tlds, ipv4_addresses)])
-      times_v4 += [time for time in udp_times if time >= 0]
+      udp_results = pool.starmap(timed_query, [[dns.query.udp, tld, ip] for tld, ip in itertools.product(tlds, ipv4_addresses)])
+      times_v4 += [res[0] for res in udp_results if res[0] >= 0]
       for tld in tlds:
         for rsi in ROOT_SERVERS:
-            rsi.add_time_v4('udp', tld, udp_times.pop(0))
+          qtime, data = udp_results.pop(0)
+          rsi.add_query(QKIND.NS, 'ipv4', 'udp', tld, qtime, data)
 
     if not args.no_tcp:
-      tcp_times = pool.starmap(timed_query, [[dns.query.tcp, tld, ip] for tld, ip in itertools.product(tlds, ipv4_addresses)])
-      times_v4 += [time for time in tcp_times if time >= 0]
+      tcp_results = pool.starmap(timed_query, [[dns.query.tcp, tld, ip] for tld, ip in itertools.product(tlds, ipv4_addresses)])
+      times_v4 += [res[0] for res in tcp_results if res[0] >= 0]
       for tld in tlds:
         for rsi in ROOT_SERVERS:
-            rsi.add_time_v4('tcp', tld, tcp_times.pop(0))
+          qtime, data = tcp_results.pop(0)
+          rsi.add_query(QKIND.NS, 'ipv4', 'tcp', tld, qtime, data)
 
-    mean = str(statistics.mean(times_v4))[:SIG_CHARS]
-    minimum = str(min(times_v4))[:SIG_CHARS]
-    maximum = str(max(times_v4))[:SIG_CHARS]
-    fancy_output(args.delay, "\rIPv4 DNS test cycle " + str(ii) + " min:" + minimum + " max:" + maximum + " avg:" + mean)
+    fancy_stats(args.delay, "\rIPv4 DNS times cycle " + str(ii), times_v4)
 
 # Perform IPv6 tests
 if not args.no_v6 and IPV6_SUPPORT:
@@ -878,33 +908,29 @@ if not args.no_v6 and IPV6_SUPPORT:
       lengths.append(len(trace))
       rsi.traceroute_v6 = trace
 
-    median = str(statistics.median(lengths))
-    minimum = str(min(lengths))
-    maximum = str(max(lengths))
-    fancy_output(5, "\rtraceroute6 hops min:" + minimum + " max:" + maximum + " median:" + median)
+    fancy_stats(5, "\rtraceroute6 hops ", lengths)
 
   fancy_output(0.5, "\rRunning IPv6 DNS queries with " + str(args.num_threads) + " threads")
   dbgLog(LOG_INFO, "Running IPv6 DNS queries with " + str(args.num_threads) + " threads")
   for ii in range(1, args.num_tests + 1):
     times_v6 = []
     if not args.no_udp:
-      udp_times = pool.starmap(timed_query, [[dns.query.udp, tld, ip] for tld, ip in itertools.product(tlds, ipv6_addresses)])
-      times_v6 += [time for time in udp_times if time >= 0]
+      udp_results = pool.starmap(timed_query, [[dns.query.udp, tld, ip] for tld, ip in itertools.product(tlds, ipv6_addresses)])
+      times_v6 += [res[0] for res in udp_results if res[0] >= 0]
       for tld in tlds:
         for rsi in ROOT_SERVERS:
-            rsi.add_time_v6('udp', tld, udp_times.pop(0))
+          qtime, data = udp_results.pop(0)
+          rsi.add_query(QKIND.NS, 'ipv6', 'udp', tld, qtime, data)
 
     if not args.no_tcp:
-      tcp_times = pool.starmap(timed_query, [[dns.query.tcp, tld, ip] for tld, ip in itertools.product(tlds, ipv6_addresses)])
-      times_v6 += [time for time in tcp_times if time >= 0]
+      tcp_results = pool.starmap(timed_query, [[dns.query.tcp, tld, ip] for tld, ip in itertools.product(tlds, ipv6_addresses)])
+      times_v6 += [res[0] for res in tcp_results if res[0] >= 0]
       for tld in tlds:
         for rsi in ROOT_SERVERS:
-            rsi.add_time_v6('tcp', tld, tcp_times.pop(0))
+          qtime, data = tcp_results.pop(0)
+          rsi.add_query(QKIND.NS, 'ipv6', 'tcp', tld, qtime, data)
 
-    mean = str(statistics.mean(times_v6))[:SIG_CHARS]
-    minimum = str(min(times_v6))[:SIG_CHARS]
-    maximum = str(max(times_v6))[:SIG_CHARS]
-    fancy_output(args.delay, "\rIPv6 DNS test cycle " + str(ii) + " min:" + minimum + " max:" + maximum + " avg:" + mean)
+    fancy_stats(args.delay, "\rIPv6 DNS times cycle " + str(ii), times_v6)
 
 OUTPUT['timestamps']['end'] = datetime.datetime.utcnow().isoformat('T', timespec='seconds') + 'Z'
 pool.close()
