@@ -82,10 +82,17 @@ STATIC_SERVERS = [ # Only used to discover actual RSIs if local recursive resolu
 {'a': '202.12.27.33', 'aaaa': '2001:dc3::35'}
 ]
 
+STATIC_OPEN_RESOLVERS = [ # List of open resolvers to test
+{'name': 'Cloudflare', 'a': '1.1.1.1', 'aaaa': '2606:4700:4700::1111'},
+{'name': 'Google', 'a': '8.8.8.8', 'aaaa': '2001:4860:4860::8888'},
+{'name': 'OpenDNS', 'a': '208.67.220.220', 'aaaa': '2620:119:35::35'},
+{'name': 'Quad9', 'a': '9.9.9.9', 'aaaa': '2620:fe::9'}
+]
+
 # These correspond to the query kinds from RSSAC057 section 3.2
 # https://www.icann.org/en/system/files/files/rssac-057-09sep21-en.pdf
 class QKIND(Enum):
-  HOST = auto() # 3.2.1
+  CH = auto() # 3.2.1
   NS = auto() # 3.2.2
   DS = auto() # 3.2.3
   OPEN = auto() # Open resolvers
@@ -100,7 +107,7 @@ class Server():
     self.ipv6 = ipv6
 
 
-class OpenServer(Server):
+class OpenResolver(Server):
   def __init__(self, name, ipv4, ipv6):
     Server.__init__(self, name, ipv4, ipv6)
     self.queries = {'ipv4': [], 'ipv6': []}
@@ -119,6 +126,7 @@ class OpenServer(Server):
     rv['ipv4'] = self.ipv4
     rv['ipv6'] = self.ipv6
     rv['queries'] = self.queries
+    return rv
 
 
 class RootServer(Server):
@@ -235,14 +243,19 @@ def dbgLog(lvl, dbgStr):
   elif LOG_OUTPUT == 'tty':
     print(outStr)
 
-# Fancier output than normal debug logging
+# Silent at LOG_ERROR
+# Fancier output at LOG_WARN and LOG_INFO
+# Normal output at LOG_DEBUG
 # Takes a delay in seconds to wait after string(ss) is printed
 def fancy_output(delay, ss):
   window = 70 # Maximum length of ss
   min_len = 2 # Minimum length of ss
 
-  # Only triggers on WARN and INFO log levels
-  if LOG_LEVEL >= LOG_DEBUG or LOG_LEVEL <= LOG_ERROR:
+  if LOG_LEVEL <= LOG_ERROR:
+    return
+
+  if LOG_LEVEL >= LOG_DEBUG:
+    dbgLog(LOG_INFO, ss)
     return
 
   if len(ss) < min_len:
@@ -467,15 +480,16 @@ def dn_dec(dn):
         return dn[:-1] + chr(ord(dn[-1:]) - 1)
 
 # Time the query and response to a root server IP address(v4/v6)
-# Takes a string protocol for the type of query(TCP/UDP), a TLD to query, an IP address, and a QKIND
+# Takes a string protocol for the type of query(TCP/UDP), a TLD to query, an IP address as string, and a QKIND
 # Returns time in seconds as float and resultant data
 # If failure returns -1 and string description of failure
 def timed_query(proto, tld, ip, qkind):
   if DYING:
     return -1, 'process dying'
 
-  if qkind is QKIND.HOST:
+  if qkind is QKIND.CH:
     query = dns.message.make_query('hostname.bind', 'TXT', rdclass=dns.rdataclass.CH, use_edns=False)
+    proto = 'udp'
   elif qkind is QKIND.NS:
     query = dns.message.make_query(tld, 'NS', rdclass=dns.rdataclass.IN, flags=dns.flags.CD, use_edns=True)
   elif qkind is QKIND.DS:
@@ -489,52 +503,77 @@ def timed_query(proto, tld, ip, qkind):
   start_time = time.monotonic() # TODO: Do more accurate timing in accordance with RSSAC057
   try:
     if proto.lower() == 'tcp':
-      response = dns.query.tcp(query, str(ip), timeout=args.query_timeout) #TODO: Why is there a string cast here? Is it necessary?
+      response = dns.query.tcp(query, ip, timeout=args.query_timeout)
     else:
-      response = dns.query.udp(query, str(ip), timeout=args.query_timeout)
+      response = dns.query.udp(query, ip, timeout=args.query_timeout)
 
   except dns.exception.Timeout:
-    dbgLog(LOG_WARN, "timed_query:" + proto + " timeout qname:" + tld + " ip:" + str(ip))
+    dbgLog(LOG_WARN, "timed_query:" + qkind.name + " " + proto + " timeout qname:" + tld + " ip:" + ip)
     return -1, 'query timeout'
   except dns.query.BadResponse:
-    dbgLog(LOG_WARN, "timed_query:" + proto + " bad response qname:" + tld + " ip:" + str(ip))
+    dbgLog(LOG_WARN, "timed_query:" + qkind.name + " " + proto + " bad response qname:" + tld + " ip:" + ip)
     return -1, 'bad response'
   except dns.query.UnexpectedSource:
-    dbgLog(LOG_WARN, "timed_query:" + proto + " bad source IP in response qname:" + tld + " ip:" + str(ip))
+    dbgLog(LOG_WARN, "timed_query:" + qkind.name + " " + proto + " bad source IP in response qname:" + tld + " ip:" + ip)
     return -1, 'bad source IP in response'
   except dns.exception.DNSException as e:
-    dbgLog(LOG_WARN, "timed_query:" + proto + " general dns error qname:" + tld + " ip:" + str(ip))
+    dbgLog(LOG_WARN, "timed_query:" + qkind.name + " " + proto + " general dns error qname:" + tld + " ip:" + ip)
     return -1, 'general dns error'
   except ConnectionError as e:
-    dbgLog(LOG_WARN, "timed_query:" + proto + " Connection error qname:" + tld + " ip:" + str(ip) + ":" + str(e))
+    dbgLog(LOG_WARN, "timed_query:" + qkind.name + " " + proto + " Connection error qname:" + tld + " ip:" + ip + ":" + str(e))
     return -1, 'connection error'
   except OSError as e:
-    dbgLog(LOG_WARN, "timed_query:" + proto + " OSError error qname:" + tld + " ip:" + str(ip) + ":" + str(e))
+    dbgLog(LOG_WARN, "timed_query:" + qkind.name + " " + proto + " OSError error qname:" + tld + " ip:" + ip + ":" + str(e))
     return -1, 'OSError error'
 
   qtime = time.monotonic() - start_time
-  dbgLog(LOG_DEBUG, "timed_query:" + proto + " " + tld + " " + str(ip) + " " + str(qtime))
+  dbgLog(LOG_DEBUG, "timed_query:" + qkind.name + " " + proto + " " + tld + " " + ip + " " + str(qtime))
   return qtime, 'some data' # TODO: Actually return data
 
-
-# Performs a DNS test cycle and stores the results
-# Takes a protocol(udp|tcp), a list of TLDs and a list of IPv4 addresses
+# Performs the complete DNS test cycle and stores the results
+# Takes a list of TLDs and a list of IPv4 addresses
 # Returns a list of float times
-def dns_test_cycle(proto, tlds, ip_addresses):
+# QKIND.OPEN queries are not included in returned times
+def dns_test_cycle(tlds, ip_addresses):
   rv = []
+  protos = []
+  if not args.no_udp:
+    protos.append('udp')
+  if not args.no_tcp:
+    protos.append('tcp')
+
   for qkind in QKIND:
     if qkind == QKIND.OPEN:
-      pass # TODO: Implement this
-    else:
-      results = POOL.starmap(timed_query, [[proto, tld, ip, qkind] for tld, ip in itertools.product(tlds, ip_addresses)])
-      rv += [res[0] for res in results if res[0] >= 0]
-      for tld in tlds:
+      results = POOL.starmap(timed_query, [['udp', '.', ip, qkind] for ip in ip_addresses])
+      for res in OPEN_RESOLVERS:
+        qtime, data = results.pop(0)
+        if ipaddress.ip_address(ip_addresses[0]).version == 4:
+          res.add_query('ipv4', qtime, data)
+        else:
+          res.add_query('ipv6', qtime, data)
+
+    elif qkind == QKIND.CH:
+      for proto in protos:
+        results = POOL.starmap(timed_query, [[proto, '.', ip, qkind] for ip in ip_addresses])
+        rv += [res[0] for res in results if res[0] >= 0]
         for rsi in ROOT_SERVERS:
           qtime, data = results.pop(0)
           if ipaddress.ip_address(ip_addresses[0]).version == 4:
-            rsi.add_query(qkind, 'ipv4', proto.lower(), tld, qtime, data)
+            rsi.add_query(qkind, 'ipv4', proto, '.', qtime, data)
           else:
-            rsi.add_query(qkind, 'ipv6', proto.lower(), tld, qtime, data)
+            rsi.add_query(qkind, 'ipv6', proto, '.', qtime, data)
+
+    else:
+      for proto in protos:
+        results = POOL.starmap(timed_query, [[proto, tld, ip, qkind] for tld, ip in itertools.product(tlds, ip_addresses)])
+        rv += [res[0] for res in results if res[0] >= 0]
+        for tld in tlds: # Is this wrong for CH?
+          for rsi in ROOT_SERVERS:
+            qtime, data = results.pop(0)
+            if ipaddress.ip_address(ip_addresses[0]).version == 4:
+              rsi.add_query(qkind, 'ipv4', proto, tld, qtime, data)
+            else:
+              rsi.add_query(qkind, 'ipv6', proto, tld, qtime, data)
 
   return rv
 
@@ -803,7 +842,6 @@ ap.add_argument('--no-traceroute', action='store_true', default=False,
 args = ap.parse_args()
 
 LOG_LEVEL = min(args.verbose, LOG_DEBUG)
-dbgLog(LOG_INFO, "Begin Execution")
 fancy_output(0, "\rBegin Execution")
 random.seed()
 
@@ -827,9 +865,11 @@ if not ROOT_SERVERS:
   ROOT_SERVERS = auth_discover_root_servers(dns.query.udp)
 if not ROOT_SERVERS:
   death("Unable to contact any root servers")
-
-dbgLog(LOG_DEBUG, "Found " + str(len(ROOT_SERVERS)) + " root servers")
 fancy_output(1, "\rFound " + str(len(ROOT_SERVERS)) + " root servers")
+
+# Init our open resolvers
+OPEN_RESOLVERS = [OpenResolver(res['name'], res['a'], res['aaaa']) for res in STATIC_OPEN_RESOLVERS]
+fancy_output(1, "\rUsing " + str(len(OPEN_RESOLVERS)) + " open resolvers")
 
 # Is IPv6 supported on this host?
 if not args.no_v6:
@@ -867,8 +907,6 @@ else:
   tlds = args.tlds.replace('.', '').lower().split(',')
   if not all(map(is_valid_dns_label, tlds)):
     death("--tlds contains invalid TLD")
-
-dbgLog(LOG_DEBUG, "Found " + str(len(tlds)) + " TLDs")
 fancy_output(1, "\rFound " + str(len(tlds)) + " TLDs")
 
 # Our global pool of worker threads/processes
@@ -898,15 +936,10 @@ if not args.no_v4:
       rsi.traceroute_v4 = trace
     fancy_stats(5, "\rtraceroute hops ", lengths)
 
-  fancy_output(0, "\rRunning IPv4 DNS queries with " + str(args.num_threads) + " threads")
-  dbgLog(LOG_INFO, "Running IPv4 DNS queries with " + str(args.num_threads) + " threads")
+  fancy_output(0, "\rQuerying on IPv4 with " + str(args.num_threads) + " threads")
   for ii in range(1, args.num_tests + 1):
-    times_v4 = []
-    if not args.no_udp:
-      times_v4 += dns_test_cycle('udp', tlds, ipv4_addresses)
-    if not args.no_tcp:
-      times_v4 += dns_test_cycle('tcp', tlds, ipv4_addresses)
-    fancy_stats(args.delay, "\rIPv4 DNS times cycle " + str(ii), times_v4)
+    fancy_stats(args.delay, "\rRSI IPv4 query times cycle:" + str(ii),
+                  dns_test_cycle(tlds, ipv4_addresses))
 
 # Perform IPv6 tests
 if not args.no_v6 and IPV6_SUPPORT:
@@ -922,15 +955,10 @@ if not args.no_v6 and IPV6_SUPPORT:
       rsi.traceroute_v6 = trace
     fancy_stats(5, "\rtraceroute6 hops ", lengths)
 
-  fancy_output(0.5, "\rRunning IPv6 DNS queries with " + str(args.num_threads) + " threads")
-  dbgLog(LOG_INFO, "Running IPv6 DNS queries with " + str(args.num_threads) + " threads")
+  fancy_output(0.5, "\rQuerying on IPv6 with " + str(args.num_threads) + " threads")
   for ii in range(1, args.num_tests + 1):
-    times_v6 = []
-    if not args.no_udp:
-      times_v6 += dns_test_cycle('udp', tlds, ipv6_addresses)
-    if not args.no_tcp:
-      times_v6 += dns_test_cycle('tcp', tlds, ipv6_addresses)
-    fancy_stats(args.delay, "\rIPv6 DNS times cycle " + str(ii), times_v6)
+    fancy_stats(args.delay, "\rRSI IPv6 query times cycle:" + str(ii),
+                  dns_test_cycle(tlds, ipv6_addresses))
 
 OUTPUT['timestamps']['end'] = datetime.datetime.utcnow().isoformat('T', timespec='seconds') + 'Z'
 POOL.close()
@@ -939,6 +967,7 @@ print()
 
 # Create output and write it
 OUTPUT['RSIs'] = [rsi.to_dict() for rsi in ROOT_SERVERS]
+OUTPUT['open_resolvers'] = [res.to_dict() for res in OPEN_RESOLVERS]
 out_str = json.dumps(OUTPUT, indent=2)
 
 if len(args.out_file) > 0:
