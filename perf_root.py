@@ -521,29 +521,29 @@ def tcp_timed_query(query, ip):
     response = dns.query.tcp(query, '', timeout=args.query_timeout, sock=sock)
 
   except dns.exception.Timeout:
-    dbg_log(LOG_WARN, "tcp_timed_query:timeout: ip:" + ip)
+    dbg_log(LOG_WARN, "tcp_timed_query:query_timeout: ip:" + ip)
     sock.close()
-    return -1, 'query timeout'
+    return -1, 'query_timeout'
   except dns.query.BadResponse:
-    dbg_log(LOG_WARN, "tcp_timed_query:bad_resp: ip:" + ip)
+    dbg_log(LOG_WARN, "tcp_timed_query:bad_response: ip:" + ip)
     sock.close()
-    return -1, 'bad response'
+    return -1, 'bad_response'
   except dns.query.UnexpectedSource:
-    dbg_log(LOG_WARN, "tcp_timed_query:bad_src: ip:" + ip)
+    dbg_log(LOG_WARN, "tcp_timed_query:bad_source: ip:" + ip)
     sock.close()
-    return -1, 'bad source IP in response'
+    return -1, 'bad_source'
   except dns.exception.DNSException as e:
-    dbg_log(LOG_WARN, "tcp_timed_query:dns_except: ip:" + ip + ":" + str(e))
+    dbg_log(LOG_WARN, "tcp_timed_query:dns_exception: ip:" + ip + ":" + str(e))
     sock.close()
-    return -1, 'general dns error'
+    return -1, 'dns_exception'
   except ConnectionError as e:
-    dbg_log(LOG_WARN, "tcp_timed_query:con_err: ip:" + ip + ":" + str(e))
+    dbg_log(LOG_WARN, "tcp_timed_query:connection_error: ip:" + ip + ":" + str(e))
     sock.close()
-    return -1, 'connection error'
+    return -1, 'connection_error'
   except OSError as e:
     dbg_log(LOG_WARN, "tcp_timed_query:os_err: ip:" + ip + ":" + str(e))
     sock.close()
-    return -1, 'OSError error'
+    return -1, 'os_error'
 
   sock.close()
   qtime = time.monotonic() - start_time
@@ -551,7 +551,7 @@ def tcp_timed_query(query, ip):
   if response.rcode() == 0:
     return qtime, 'some data' # TODO: Actually return data
   else:
-    return -1, 'bad_rcode: ' + dns.rcode.to_text(response.rcode())
+    return -1, 'bad_rcode:' + dns.rcode.to_text(response.rcode())
 
 
 # Perform timed query over UDP
@@ -565,23 +565,23 @@ def udp_timed_query(query, ip):
     start_time = time.monotonic()
     response = dns.query.udp(query, ip, timeout=args.query_timeout)
   except dns.exception.Timeout:
-    dbg_log(LOG_WARN, "udp_timed_query:timeout: ip:" + ip)
-    return -1, 'query timeout'
+    dbg_log(LOG_WARN, "udp_timed_query:query_timeout: ip:" + ip)
+    return -1, 'query_timeout'
   except dns.query.BadResponse:
-    dbg_log(LOG_WARN, "udp_timed_query:bad_resp: ip:" + ip)
-    return -1, 'bad response'
+    dbg_log(LOG_WARN, "udp_timed_query:bad_response: ip:" + ip)
+    return -1, 'bad_response'
   except dns.query.UnexpectedSource:
-    dbg_log(LOG_WARN, "udp_timed_query:bad_src: ip:" + ip)
-    return -1, 'bad source IP in response'
+    dbg_log(LOG_WARN, "udp_timed_query:bad_source: ip:" + ip)
+    return -1, 'bad_source'
   except dns.exception.DNSException as e:
-    dbg_log(LOG_WARN, "udp_timed_query:dns_except: ip:" + ip + ":" + str(e))
-    return -1, 'general dns error'
+    dbg_log(LOG_WARN, "udp_timed_query:dns_exception: ip:" + ip + ":" + str(e))
+    return -1, 'dns_exception'
   except ConnectionError as e:
-    dbg_log(LOG_WARN, "udp_timed_query:con_err: ip:" + ip + ":" + str(e))
-    return -1, 'connection error'
+    dbg_log(LOG_WARN, "udp_timed_query:connection_err: ip:" + ip + ":" + str(e))
+    return -1, 'connection_error'
   except OSError as e:
-    dbg_log(LOG_WARN, "udp_timed_query:os_err: ip:" + ip + ":" + str(e))
-    return -1, 'OSError error'
+    dbg_log(LOG_WARN, "udp_timed_query:os_error: ip:" + ip + ":" + str(e))
+    return -1, 'os_error'
 
   qtime = time.monotonic() - start_time
   dbg_log(LOG_DEBUG, "udp_timed_query: ip:" + ip + ":" + str(qtime))
@@ -589,7 +589,7 @@ def udp_timed_query(query, ip):
     return qtime, 'some data' # TODO: Actually return data
   else:
     dbg_log(LOG_WARN, "udp_timed_query:bad_rcode: ip:" + ip + ":" + str(e))
-    return -1, 'bad_rcode: ' + dns.rcode.to_text(response.rcode())
+    return -1, 'bad_rcode:' + dns.rcode.to_text(response.rcode())
 
 
 # Performs the complete DNS test cycle and stores the results
