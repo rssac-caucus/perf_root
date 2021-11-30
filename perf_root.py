@@ -481,8 +481,8 @@ def dn_dec(dn):
 
 # Time the query and response to a root server IP address(v4/v6)
 # Takes a string protocol for the type of query(TCP/UDP), a TLD to query, an IP address as string, and a QKIND
-# Returns time in seconds as float and resultant data
-# If failure returns -1 and string description of failure
+# Returns time and resultant data
+# On failure returns -1 and string description of failure
 def timed_query(proto, tld, ip, qkind):
   if DYING:
     return -1, 'process dying'
@@ -500,35 +500,97 @@ def timed_query(proto, tld, ip, qkind):
     dbgLog(LOG_ERROR, "timed_query:" + proto + " invalid query kind ")
     return -1, 'invalid query kind'
 
-  start_time = time.monotonic() # TODO: Do more accurate timing in accordance with RSSAC057
+  if proto.lower() == 'tcp':
+    return tcp_timed_query(query, ip)
+  else:
+    return udp_timed_query(query, ip)
+
+# Perform timed query over TCP
+# Takes a dns.message.query and an IP
+# Returns time and resultant data
+# On failure returns -1 and string description of failure
+def tcp_timed_query(query, ip):
   try:
-    if proto.lower() == 'tcp':
-      response = dns.query.tcp(query, ip, timeout=args.query_timeout)
+    if ipaddress.ip_address(ip).version == 4:
+      sock = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
     else:
-      response = dns.query.udp(query, ip, timeout=args.query_timeout)
+      sock = socket.socket(family=socket.AF_INET6, type=socket.SOCK_STREAM)
+
+    sock.connect((ip, 53))
+    start_time = time.monotonic()
+    response = dns.query.tcp(query, '', timeout=args.query_timeout, sock=sock)
 
   except dns.exception.Timeout:
-    dbgLog(LOG_WARN, "timed_query:" + qkind.name + " " + proto + " timeout qname:" + tld + " ip:" + ip)
+    dbgLog(LOG_WARN, "tcp_timed_query:timeout: ip:" + ip)
+    sock.close()
     return -1, 'query timeout'
   except dns.query.BadResponse:
-    dbgLog(LOG_WARN, "timed_query:" + qkind.name + " " + proto + " bad response qname:" + tld + " ip:" + ip)
+    dbgLog(LOG_WARN, "tcp_timed_query:bad_resp: ip:" + ip)
+    sock.close()
     return -1, 'bad response'
   except dns.query.UnexpectedSource:
-    dbgLog(LOG_WARN, "timed_query:" + qkind.name + " " + proto + " bad source IP in response qname:" + tld + " ip:" + ip)
+    dbgLog(LOG_WARN, "tcp_timed_query:bad_src: ip:" + ip)
+    sock.close()
     return -1, 'bad source IP in response'
   except dns.exception.DNSException as e:
-    dbgLog(LOG_WARN, "timed_query:" + qkind.name + " " + proto + " general dns error qname:" + tld + " ip:" + ip)
+    dbgLog(LOG_WARN, "tcp_timed_query:dns_except: ip:" + ip + ":" + str(e))
+    sock.close()
     return -1, 'general dns error'
   except ConnectionError as e:
-    dbgLog(LOG_WARN, "timed_query:" + qkind.name + " " + proto + " Connection error qname:" + tld + " ip:" + ip + ":" + str(e))
+    dbgLog(LOG_WARN, "tcp_timed_query:con_err: ip:" + ip + ":" + str(e))
+    sock.close()
     return -1, 'connection error'
   except OSError as e:
-    dbgLog(LOG_WARN, "timed_query:" + qkind.name + " " + proto + " OSError error qname:" + tld + " ip:" + ip + ":" + str(e))
+    dbgLog(LOG_WARN, "tcp_timed_query:os_err: ip:" + ip + ":" + str(e))
+    sock.close()
+    return -1, 'OSError error'
+
+  sock.close()
+  qtime = time.monotonic() - start_time
+  dbgLog(LOG_DEBUG, "tcp_timed_query: ip:" + ip + ":" + str(qtime))
+  if response.rcode() == 0:
+    return qtime, 'some data' # TODO: Actually return data
+  else:
+    return -1, 'bad_rcode: ' + dns.rcode.to_text(response.rcode())
+
+
+# Perform timed query over UDP
+# Takes a dns.message.query and an IP
+# Returns time and resultant data
+# On failure returns -1 and string description of failure
+def udp_timed_query(query, ip):
+  start_time = time.monotonic()
+
+  try:
+    start_time = time.monotonic()
+    response = dns.query.udp(query, ip, timeout=args.query_timeout)
+  except dns.exception.Timeout:
+    dbgLog(LOG_WARN, "udp_timed_query:timeout: ip:" + ip)
+    return -1, 'query timeout'
+  except dns.query.BadResponse:
+    dbgLog(LOG_WARN, "udp_timed_query:bad_resp: ip:" + ip)
+    return -1, 'bad response'
+  except dns.query.UnexpectedSource:
+    dbgLog(LOG_WARN, "udp_timed_query:bad_src: ip:" + ip)
+    return -1, 'bad source IP in response'
+  except dns.exception.DNSException as e:
+    dbgLog(LOG_WARN, "udp_timed_query:dns_except: ip:" + ip + ":" + str(e))
+    return -1, 'general dns error'
+  except ConnectionError as e:
+    dbgLog(LOG_WARN, "udp_timed_query:con_err: ip:" + ip + ":" + str(e))
+    return -1, 'connection error'
+  except OSError as e:
+    dbgLog(LOG_WARN, "udp_timed_query:os_err: ip:" + ip + ":" + str(e))
     return -1, 'OSError error'
 
   qtime = time.monotonic() - start_time
-  dbgLog(LOG_DEBUG, "timed_query:" + qkind.name + " " + proto + " " + tld + " " + ip + " " + str(qtime))
-  return qtime, 'some data' # TODO: Actually return data
+  dbgLog(LOG_DEBUG, "udp_timed_query: ip:" + ip + ":" + str(qtime))
+  if response.rcode() == 0:
+    return qtime, 'some data' # TODO: Actually return data
+  else:
+    dbgLog(LOG_WARN, "udp_timed_query:bad_rcode: ip:" + ip + ":" + str(e))
+    return -1, 'bad_rcode: ' + dns.rcode.to_text(response.rcode())
+
 
 # Performs the complete DNS test cycle and stores the results
 # Takes a list of TLDs and a list of IPv4 addresses
