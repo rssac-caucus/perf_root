@@ -197,7 +197,7 @@ def euthanize(signal, frame):
 
   #  for thr in threading.enumerate():
   #    if thr.is_alive():
-  #      dbgLog(LOG_DEBUG, "Thread name:" + thr.name + " id:" + str(thr.ident) + " daemon:" + str(thr.daemon))
+  #      dbg_log(LOG_DEBUG, "Thread name:" + thr.name + " id:" + str(thr.ident) + " daemon:" + str(thr.daemon))
 
   sys.exit("SIG-" + str(signal) + " caught, exiting\n")
 
@@ -207,7 +207,7 @@ def death(errStr=''):
   sys.exit("FATAL:" + errStr)
 
 # Logs message to LOG_FNAME or tty
-def dbgLog(lvl, dbgStr):
+def dbg_log(lvl, dbgStr):
   if not LOG_OUTPUT:
     return
 
@@ -255,15 +255,15 @@ def fancy_output(delay, ss):
     return
 
   if LOG_LEVEL >= LOG_DEBUG:
-    dbgLog(LOG_INFO, ss)
+    dbg_log(LOG_INFO, ss)
     return
 
   if len(ss) < min_len:
-    dbgLog(LOG_ERROR, "fancy_output: output too short")
+    dbg_log(LOG_ERROR, "fancy_output: output too short")
     return
 
   if len(ss) > window:
-    dbgLog(LOG_ERROR, "fancy_output: print window exceeded")
+    dbg_log(LOG_ERROR, "fancy_output: print window exceeded")
     return
 
   if ss[0] != '\r':
@@ -308,21 +308,21 @@ def send_walk_query(qstr):
 
   query = dns.message.make_query(qstr.lower(), 'NS', want_dnssec=True)
   server = str(random.choice(ROOT_SERVERS).ipv4)
-  dbgLog(LOG_DEBUG, "Using server:" + server)
+  dbg_log(LOG_DEBUG, "Using server:" + server)
 
   try:
     rv = dns.query.udp(query, server, ignore_unexpected=True, timeout=args.query_timeout)
   except dns.exception.Timeout:
-    dbgLog(LOG_WARN, "send_walk_query: query timeout " + server + " qname:" + qstr)
+    dbg_log(LOG_WARN, "send_walk_query: query timeout " + server + " qname:" + qstr)
     return None
   except dns.query.BadResponse:
-    dbgLog(LOG_WARN, "send_walk_query: bad response " + server + " qname:" + qstr)
+    dbg_log(LOG_WARN, "send_walk_query: bad response " + server + " qname:" + qstr)
     return None
   except dns.query.UnexpectedSource:
-    dbgLog(LOG_WARN, "send_walk_query: bad source IP in response " + server + " qname:" + qstr)
+    dbg_log(LOG_WARN, "send_walk_query: bad source IP in response " + server + " qname:" + qstr)
     return None
   except dns.exception.DNSException as e:
-    dbgLog(LOG_WARN, "send_walk_query: general dns error " + server + " " + str(e))
+    dbg_log(LOG_WARN, "send_walk_query: general dns error " + server + " " + str(e))
     return None
 
   return rv
@@ -339,7 +339,7 @@ def handle_walk_response(resp):
         k2 = rr.to_text().split()[4].rstrip('.')
         if len(k1) == 0: # Ignore the zone apex NSEC RR
           continue
-        dbgLog(LOG_DEBUG, "k1:" + k1 + " k2:" + k2)
+        dbg_log(LOG_DEBUG, "k1:" + k1 + " k2:" + k2)
         return k1, k2
     for rr in resp.answer:
       if rr.rdclass == dns.rdataclass.IN and rr.rdtype == dns.rdatatype.NSEC:
@@ -347,30 +347,30 @@ def handle_walk_response(resp):
         k2 = rr.to_text().split()[4].rstrip('.')
         if len(k1) == 0: # Ignore the zone apex NSEC RR
           continue
-        dbgLog(LOG_DEBUG, "k1:" + k1 + " k2:" + k2)
+        dbg_log(LOG_DEBUG, "k1:" + k1 + " k2:" + k2)
         return k1, k2
 
   elif resp.rcode() == 0 and resp.opcode() == 0: # NOERROR
     for rr in resp.authority:
       if rr.rdclass == dns.rdataclass.IN and rr.rdtype == dns.rdatatype.NS:
         ns = rr.to_text().split()[0].rstrip('.')
-        dbgLog(LOG_DEBUG, "ns:" + ns)
+        dbg_log(LOG_DEBUG, "ns:" + ns)
         return ns, ns
     for rr in resp.answer:
       if rr.rdclass == dns.rdataclass.IN and rr.rdtype == dns.rdatatype.NS:
         ns = rr.to_text().split()[0].rstrip('.')
-        dbgLog(LOG_DEBUG, "ns:" + ns)
+        dbg_log(LOG_DEBUG, "ns:" + ns)
         return ns, ns
 
   else: # Need to handle SERVFAIL
-    dbgLog(LOG_WARN, "handle_walk_response unhandled response:" + str(resp))
+    dbg_log(LOG_WARN, "handle_walk_response unhandled response:" + str(resp))
 
   return None, None
 
 # Iteratively find X tlds surrounding qstr
 # Returns list of X tlds alpha sorted
 def find_tlds(qstr, x):
-  dbgLog(LOG_DEBUG, "find_tlds:" + qstr + " x:" + str(x))
+  dbg_log(LOG_DEBUG, "find_tlds:" + qstr + " x:" + str(x))
   tlds = {}
 
   # The first time is special
@@ -398,24 +398,24 @@ def find_tlds(qstr, x):
   query_attempts = 0
   while True:
     if query_attempts > DNS_MAX_QUERIES:
-     dbgLog(LOG_DEBUG, "find_tlds_while DNS query failed " + str(DNS_MAX_QUERIES) + " times")
+     dbg_log(LOG_DEBUG, "find_tlds_while DNS query failed " + str(DNS_MAX_QUERIES) + " times")
      death("Max query attempts exceeded")
 
-    dbgLog(LOG_DEBUG, "find_tlds_while dn_down:" + dn_down + " dn_up:" + dn_up + " len_tlds:" + str(len(tlds)))
+    dbg_log(LOG_DEBUG, "find_tlds_while dn_down:" + dn_down + " dn_up:" + dn_up + " len_tlds:" + str(len(tlds)))
     if len(tlds) >= x or not going_down and not going_up:
       return sorted(tlds)[:x]
 
     if going_down:
       resp = send_walk_query(dn_down)
       if resp == None:
-        dbgLog(LOG_WARN, "find_tlds walk_down query failed for " + qstr)
+        dbg_log(LOG_WARN, "find_tlds walk_down query failed for " + qstr)
         query_attempts += 1
         continue
       else:
         query_attempts = 0
         dn_down, _ = handle_walk_response(resp)
       if dn_down == None:
-        dbgLog(LOG_DEBUG, "find_tlds finished walking down")
+        dbg_log(LOG_DEBUG, "find_tlds finished walking down")
         going_down = False
         dn_down = '.'
       else:
@@ -426,14 +426,14 @@ def find_tlds(qstr, x):
     if going_up:
       resp = send_walk_query(dn_up)
       if resp == None:
-        dbgLog(LOG_WARN, "find_tlds walk_up query failed for " + qstr)
+        dbg_log(LOG_WARN, "find_tlds walk_up query failed for " + qstr)
         query_attempts += 1
         continue
       else:
         query_attempts = 0
         _, dn_up = handle_walk_response(resp)
       if dn_up == None:
-        dbgLog(LOG_DEBUG, "find_tlds finished walking up")
+        dbg_log(LOG_DEBUG, "find_tlds finished walking up")
         going_up = False
         dn_up = '.'
       else:
@@ -497,7 +497,7 @@ def timed_query(proto, tld, ip, qkind):
   elif qkind is QKIND.OPEN:
     query = dns.message.make_query('.', 'NS', rdclass=dns.rdataclass.IN, use_edns=False)
   else:
-    dbgLog(LOG_ERROR, "timed_query:" + proto + " invalid query kind ")
+    dbg_log(LOG_ERROR, "timed_query:" + proto + " invalid query kind ")
     return -1, 'invalid query kind'
 
   if proto.lower() == 'tcp':
@@ -521,33 +521,33 @@ def tcp_timed_query(query, ip):
     response = dns.query.tcp(query, '', timeout=args.query_timeout, sock=sock)
 
   except dns.exception.Timeout:
-    dbgLog(LOG_WARN, "tcp_timed_query:timeout: ip:" + ip)
+    dbg_log(LOG_WARN, "tcp_timed_query:timeout: ip:" + ip)
     sock.close()
     return -1, 'query timeout'
   except dns.query.BadResponse:
-    dbgLog(LOG_WARN, "tcp_timed_query:bad_resp: ip:" + ip)
+    dbg_log(LOG_WARN, "tcp_timed_query:bad_resp: ip:" + ip)
     sock.close()
     return -1, 'bad response'
   except dns.query.UnexpectedSource:
-    dbgLog(LOG_WARN, "tcp_timed_query:bad_src: ip:" + ip)
+    dbg_log(LOG_WARN, "tcp_timed_query:bad_src: ip:" + ip)
     sock.close()
     return -1, 'bad source IP in response'
   except dns.exception.DNSException as e:
-    dbgLog(LOG_WARN, "tcp_timed_query:dns_except: ip:" + ip + ":" + str(e))
+    dbg_log(LOG_WARN, "tcp_timed_query:dns_except: ip:" + ip + ":" + str(e))
     sock.close()
     return -1, 'general dns error'
   except ConnectionError as e:
-    dbgLog(LOG_WARN, "tcp_timed_query:con_err: ip:" + ip + ":" + str(e))
+    dbg_log(LOG_WARN, "tcp_timed_query:con_err: ip:" + ip + ":" + str(e))
     sock.close()
     return -1, 'connection error'
   except OSError as e:
-    dbgLog(LOG_WARN, "tcp_timed_query:os_err: ip:" + ip + ":" + str(e))
+    dbg_log(LOG_WARN, "tcp_timed_query:os_err: ip:" + ip + ":" + str(e))
     sock.close()
     return -1, 'OSError error'
 
   sock.close()
   qtime = time.monotonic() - start_time
-  dbgLog(LOG_DEBUG, "tcp_timed_query: ip:" + ip + ":" + str(qtime))
+  dbg_log(LOG_DEBUG, "tcp_timed_query: ip:" + ip + ":" + str(qtime))
   if response.rcode() == 0:
     return qtime, 'some data' # TODO: Actually return data
   else:
@@ -565,30 +565,30 @@ def udp_timed_query(query, ip):
     start_time = time.monotonic()
     response = dns.query.udp(query, ip, timeout=args.query_timeout)
   except dns.exception.Timeout:
-    dbgLog(LOG_WARN, "udp_timed_query:timeout: ip:" + ip)
+    dbg_log(LOG_WARN, "udp_timed_query:timeout: ip:" + ip)
     return -1, 'query timeout'
   except dns.query.BadResponse:
-    dbgLog(LOG_WARN, "udp_timed_query:bad_resp: ip:" + ip)
+    dbg_log(LOG_WARN, "udp_timed_query:bad_resp: ip:" + ip)
     return -1, 'bad response'
   except dns.query.UnexpectedSource:
-    dbgLog(LOG_WARN, "udp_timed_query:bad_src: ip:" + ip)
+    dbg_log(LOG_WARN, "udp_timed_query:bad_src: ip:" + ip)
     return -1, 'bad source IP in response'
   except dns.exception.DNSException as e:
-    dbgLog(LOG_WARN, "udp_timed_query:dns_except: ip:" + ip + ":" + str(e))
+    dbg_log(LOG_WARN, "udp_timed_query:dns_except: ip:" + ip + ":" + str(e))
     return -1, 'general dns error'
   except ConnectionError as e:
-    dbgLog(LOG_WARN, "udp_timed_query:con_err: ip:" + ip + ":" + str(e))
+    dbg_log(LOG_WARN, "udp_timed_query:con_err: ip:" + ip + ":" + str(e))
     return -1, 'connection error'
   except OSError as e:
-    dbgLog(LOG_WARN, "udp_timed_query:os_err: ip:" + ip + ":" + str(e))
+    dbg_log(LOG_WARN, "udp_timed_query:os_err: ip:" + ip + ":" + str(e))
     return -1, 'OSError error'
 
   qtime = time.monotonic() - start_time
-  dbgLog(LOG_DEBUG, "udp_timed_query: ip:" + ip + ":" + str(qtime))
+  dbg_log(LOG_DEBUG, "udp_timed_query: ip:" + ip + ":" + str(qtime))
   if response.rcode() == 0:
     return qtime, 'some data' # TODO: Actually return data
   else:
-    dbgLog(LOG_WARN, "udp_timed_query:bad_rcode: ip:" + ip + ":" + str(e))
+    dbg_log(LOG_WARN, "udp_timed_query:bad_rcode: ip:" + ip + ":" + str(e))
     return -1, 'bad_rcode: ' + dns.rcode.to_text(response.rcode())
 
 
@@ -669,7 +669,7 @@ def trace_route(binary, ip):
 
   rv = []
   cmd = binary + " -n -p 53 -m 32 " + str(ip)
-  dbgLog(LOG_INFO, "trace_route:" + cmd)
+  dbg_log(LOG_INFO, "trace_route:" + cmd)
   try:
     proc = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True)
 
@@ -698,16 +698,16 @@ def trace_route(binary, ip):
           rv.append(gateways)
 
   except subprocess.TimeoutExpired as e:
-    dbgLog(LOG_ERROR, "trace_route subprocess TimeoutExpired" + str(e))
+    dbg_log(LOG_ERROR, "trace_route subprocess TimeoutExpired" + str(e))
     return rv
   except subprocess.CalledProcessError as e:
-    dbgLog(LOG_ERROR, "trace_route subprocess CallProcessError" + str(e))
+    dbg_log(LOG_ERROR, "trace_route subprocess CallProcessError" + str(e))
     return rv
   except OSError as e:
-    dbgLog(LOG_ERROR, "trace_route subprocess OSError" + str(e))
+    dbg_log(LOG_ERROR, "trace_route subprocess OSError" + str(e))
     return rv
   except subprocess.SubprocessError:
-    dbgLog(LOG_ERROR, "trace_route general subprocess error")
+    dbg_log(LOG_ERROR, "trace_route general subprocess error")
     return rv
 
 # Returns list of RSIs if possible, otherwise returns None
@@ -716,13 +716,13 @@ def local_discover_root_servers():
   try:
     d = dns.resolver.Resolver()
   except dns.exception.DNSException as e:
-    dbgLog(LOG_WARN, "Local resolver not found " + repr(e))
+    dbg_log(LOG_WARN, "Local resolver not found " + repr(e))
     return None
 
   try:
     resp = d.resolve('.', 'NS', search=True)
   except dns.exception.DNSException as e:
-    dbgLog(LOG_WARN, "Failed to query local resolver for . " + repr(e))
+    dbg_log(LOG_WARN, "Failed to query local resolver for . " + repr(e))
     return None
 
   names = [str(name).strip('.').lower() for name in resp.rrset]
@@ -732,13 +732,13 @@ def local_discover_root_servers():
     try:
       resp_a = d.resolve(name, 'A', search=True)
     except dns.exception.DNSException as e:
-      dbgLog(LOG_WARN, "Failed querying A record for " + name + " " + repr(e))
+      dbg_log(LOG_WARN, "Failed querying A record for " + name + " " + repr(e))
       return None
 
     try:
       resp_aaaa = d.resolve(name, 'AAAA', search=True)
     except dns.exception.DNSException as e:
-      dbgLog(LOG_WARN, "Failed querying AAAA record for " + name + " " + repr(e))
+      dbg_log(LOG_WARN, "Failed querying AAAA record for " + name + " " + repr(e))
       return None
 
     rv.append(RootServer(name, str(resp_a.rrset[0]), str(resp_aaaa.rrset[0])))
@@ -758,22 +758,22 @@ def auth_discover_root_servers(fn):
   for server in STATIC_SERVERS:
     query = dns.message.make_query('.', 'NS')
     dest = server['a']
-    dbgLog(LOG_DEBUG, "auth_discover_root_servers: Trying destination:" + dest)
+    dbg_log(LOG_DEBUG, "auth_discover_root_servers: Trying destination:" + dest)
 
     try:
       primer = fn(query, dest, timeout=args.query_timeout)
-      dbgLog(LOG_DEBUG, repr(primer.section_from_number(3)))
+      dbg_log(LOG_DEBUG, repr(primer.section_from_number(3)))
     except dns.exception.Timeout:
-      dbgLog(LOG_WARN, "auth_discover_root_servers: query timeout " + dest)
+      dbg_log(LOG_WARN, "auth_discover_root_servers: query timeout " + dest)
       continue
     except dns.query.BadResponse:
-      dbgLog(LOG_WARN, "auth_discover_root_servers: bad response " + dest)
+      dbg_log(LOG_WARN, "auth_discover_root_servers: bad response " + dest)
       continue
     except dns.query.UnexpectedSource:
-      dbgLog(LOG_WARN, "auth_discover_root_servers: bad source IP in response " + dest)
+      dbg_log(LOG_WARN, "auth_discover_root_servers: bad source IP in response " + dest)
       continue
     except dns.exception.DNSException as e:
-      dbgLog(LOG_WARN, "auth_discover_root_servers: general dns error " + dest + " " + str(e))
+      dbg_log(LOG_WARN, "auth_discover_root_servers: general dns error " + dest + " " + str(e))
       continue
 
     for rr in primer.section_from_number(3): # 3 == Additional
@@ -914,16 +914,16 @@ if args.no_udp and args.no_tcp:
   death("Both TCP and UDP disabled")
 
 SYS_TYPE = get_sys_type() # Determine what the OS is
-dbgLog(LOG_INFO, "SYS_TYPE:" + SYS_TYPE)
+dbg_log(LOG_INFO, "SYS_TYPE:" + SYS_TYPE)
 OUTPUT['sys_type'] = SYS_TYPE
 
 # Find our root servers
 ROOT_SERVERS = local_discover_root_servers()
 if not ROOT_SERVERS:
-  dbgLog(LOG_WARN, "Local resolution of root servers failed, attempting direct resolution via TCP.")
+  dbg_log(LOG_WARN, "Local resolution of root servers failed, attempting direct resolution via TCP.")
   ROOT_SERVERS = auth_discover_root_servers(dns.query.tcp)
 if not ROOT_SERVERS:
-  dbgLog(LOG_WARN, "Direct TCP queries to root servers failed, attempting direct resolution via UDP.")
+  dbg_log(LOG_WARN, "Direct TCP queries to root servers failed, attempting direct resolution via UDP.")
   ROOT_SERVERS = auth_discover_root_servers(dns.query.udp)
 if not ROOT_SERVERS:
   death("Unable to contact any root servers")
@@ -941,7 +941,7 @@ if not args.no_v6:
     s.connect( (str(random.choice(ROOT_SERVERS).ipv6), 53) )
     s.close()
   except OSError:
-    dbgLog(LOG_INFO, "No local IPv6 configured")
+    dbg_log(LOG_INFO, "No local IPv6 configured")
     IPV6_SUPPORT = False
 
 if args.no_v4 and not IPV6_SUPPORT:
@@ -950,10 +950,10 @@ if args.no_v4 and not IPV6_SUPPORT:
 # Die if user requested traceroute and binaries cannot be found
 if not args.no_traceroute:
   if not args.no_v4 and not find_binary('traceroute'):
-    dbgLog(LOG_DEBUG, "No traceroute binary found in " + repr(SEARCH_PATH))
+    dbg_log(LOG_DEBUG, "No traceroute binary found in " + repr(SEARCH_PATH))
     death("IPv4 traceroute requested but traceroute binary not found, try running with --no-traceroute option")
   if not args.no_v6 and not find_binary('traceroute6'):
-    dbgLog(LOG_DEBUG, "No traceroute6 binary found in " + repr(SEARCH_PATH))
+    dbg_log(LOG_DEBUG, "No traceroute6 binary found in " + repr(SEARCH_PATH))
     death("IPv6 traceroute requested but traceroute6 binary not found, try running with --no-traceroute option")
 
 # Make our list of TLDs
@@ -993,7 +993,7 @@ if not args.no_v4:
     traces = POOL.starmap(trace_route, zip(itertools.repeat(find_binary('traceroute')), ipv4_addresses))
     lengths = []
     for rsi,trace in zip(ROOT_SERVERS, traces):
-      dbgLog(LOG_DEBUG, "traceroute_" + rsi.name + " len:" + str(len(trace)) + " first:" + repr(trace[0]))
+      dbg_log(LOG_DEBUG, "traceroute_" + rsi.name + " len:" + str(len(trace)) + " first:" + repr(trace[0]))
       lengths.append(len(trace))
       rsi.traceroute_v4 = trace
     fancy_stats(5, "\rtraceroute hops ", lengths)
@@ -1012,7 +1012,7 @@ if not args.no_v6 and IPV6_SUPPORT:
     traces = POOL.starmap(trace_route, zip(itertools.repeat(find_binary('traceroute6')), ipv6_addresses))
     lengths = []
     for rsi,trace in zip(ROOT_SERVERS, traces):
-      dbgLog(LOG_DEBUG, "traceroute6_" + rsi.name + " len:" + str(len(trace)) + " first:" + repr(trace[0]))
+      dbg_log(LOG_DEBUG, "traceroute6_" + rsi.name + " len:" + str(len(trace)) + " first:" + repr(trace[0]))
       lengths.append(len(trace))
       rsi.traceroute_v6 = trace
     fancy_stats(5, "\rtraceroute6 hops ", lengths)
