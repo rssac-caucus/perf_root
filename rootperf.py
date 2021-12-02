@@ -497,17 +497,38 @@ def timed_query(proto, tld, ip, qkind):
   elif qkind is QKIND.OPEN:
     query = dns.message.make_query('.', 'NS', rdclass=dns.rdataclass.IN, use_edns=False)
   else:
-    dbg_log(LOG_ERROR, "timed_query:" + proto + " invalid query kind ")
+    dbg_log(LOG_ERROR, "timed_query:" + proto + " invalid query kind")
     return -1, 'invalid query kind'
 
   if proto.lower() == 'tcp':
-    return tcp_timed_query(query, ip)
+    qtime, resp = tcp_timed_query(query, ip)
   else:
-    return udp_timed_query(query, ip)
+    qtime, resp = udp_timed_query(query, ip)
+
+  if not isinstance(resp, dns.message.Message):
+    return qtime, resp
+  if resp.rcode() != 0:
+    return qtime, 'bad_rcode:' + dns.rcode.to_text(response.rcode())
+  if qkind is QKIND.OPEN:
+    return qtime, ''
+
+  if qkind is QKIND.CH:
+    rrset = resp.get_rrset(dns.message.ANSWER, dns.name.from_text('hostname.bind'), dns.rdataclass.CH, dns.rdatatype.TXT)
+  elif qkind is QKIND.NS:
+    rrset = resp.get_rrset(dns.message.AUTHORITY, dns.name.from_text(tld), dns.rdataclass.IN, dns.rdatatype.NS)
+  elif qkind is QKIND.DS:
+    rrset = resp.get_rrset(dns.message.ANSWER, dns.name.from_text(tld), dns.rdataclass.IN, dns.rdatatype.DS)
+
+  if rrset == None:
+    dbg_log(LOG_WARN, "timed_query:" + proto + ":" + qkind.name + " no_data")
+    return qtime, 'no_data'
+  else:
+    dbg_log(LOG_DEBUG, qkind.name + ": rrs:" + str(len(rrset)) + " : " + rrset[0].to_text())
+    return qtime, '|'.join([rr.to_text() for rr in rrset]).strip("\"")
 
 # Perform timed query over TCP
 # Takes a dns.message.query and an IP
-# Returns time and resultant data
+# Returns time and string data or error message
 # On failure returns -1 and string description of failure
 def tcp_timed_query(query, ip):
   try:
@@ -540,6 +561,10 @@ def tcp_timed_query(query, ip):
     dbg_log(LOG_WARN, "tcp_timed_query:connection_error: ip:" + ip + ":" + str(e))
     sock.close()
     return -1, 'connection_error'
+  except EOFError as e:
+    dbg_log(LOG_WARN, "tcp_timed_query:eof_err: ip:" + ip + ":" + str(e))
+    sock.close()
+    return -1, 'eof_error'
   except OSError as e:
     dbg_log(LOG_WARN, "tcp_timed_query:os_err: ip:" + ip + ":" + str(e))
     sock.close()
@@ -548,15 +573,11 @@ def tcp_timed_query(query, ip):
   sock.close()
   qtime = time.monotonic() - start_time
   dbg_log(LOG_DEBUG, "tcp_timed_query: ip:" + ip + ":" + str(qtime))
-  if response.rcode() == 0:
-    return qtime, 'some data' # TODO: Actually return data
-  else:
-    return -1, 'bad_rcode:' + dns.rcode.to_text(response.rcode())
-
+  return qtime, response
 
 # Perform timed query over UDP
 # Takes a dns.message.query and an IP
-# Returns time and resultant data
+# Returns time and string data or error message
 # On failure returns -1 and string description of failure
 def udp_timed_query(query, ip):
   start_time = time.monotonic()
@@ -585,12 +606,7 @@ def udp_timed_query(query, ip):
 
   qtime = time.monotonic() - start_time
   dbg_log(LOG_DEBUG, "udp_timed_query: ip:" + ip + ":" + str(qtime))
-  if response.rcode() == 0:
-    return qtime, 'some data' # TODO: Actually return data
-  else:
-    dbg_log(LOG_WARN, "udp_timed_query:bad_rcode: ip:" + ip + ":" + str(e))
-    return -1, 'bad_rcode:' + dns.rcode.to_text(response.rcode())
-
+  return qtime, response
 
 # Performs the complete DNS test cycle and stores the results
 # Takes a list of TLDs and a list of IPv4 addresses
@@ -888,12 +904,12 @@ ap.add_argument('-v', '--verbose', action='count', default=0,
 ap.add_argument('--threads', type=int, action='store', default=6, choices=[1,2,3,4,5,6],
                   dest='num_threads', help='Number of threads to run concurrently')
 
-ap.add_argument('--no-tcp', action='store_true', default=False, # Toggle UDP/TCP testing off
+ap.add_argument('--no-tcp', action='store_true', default=False,
                   dest='no_tcp', help='Turn off TCP testing')
 ap.add_argument('--no-udp', action='store_true', default=False,
                   dest='no_udp', help='Turn off UDP testing')
 
-ap.add_argument('--no-ipv4', action='store_true', default=False, # Toggle IPv4/IPv6 testing off
+ap.add_argument('--no-ipv4', action='store_true', default=False,
                   dest='no_v4', help='Turn off IPv4 testing')
 ap.add_argument('--no-ipv6', action='store_true', default=False,
                   dest='no_v6', help='Turn off IPv6 testing')
