@@ -102,8 +102,6 @@ WHOAMI_SERVERS_6 = [
 {'server': 'v6.powerdns.org', 'qname': 'whoami.v6.powerdns.org', 'rr': 'AAAA'}
 ]
 
-
-
 # These correspond to the query kinds from RSSAC057 section 3.2
 # https://www.icann.org/en/system/files/files/rssac-057-09sep21-en.pdf
 class QKIND(Enum):
@@ -130,9 +128,8 @@ class OpenResolver(Server):
   def __repr__(self):
     return "name:" + self.name + " ipv4:" + str(self.ipv4) + " ipv6:" + str(self.ipv6) + " queries:" + repr(self.queries)
 
-  def add_query(self, ipv, qtime, data):
-    entry = [qtime, data]
-    self.queries[ipv].append(entry)
+  def add_query(self, ipv, qtime):
+    self.queries[ipv].append(qtime)
 
   # Convert this object to a dict and return it
   def to_dict(self):
@@ -641,9 +638,9 @@ def dns_test_cycle(tlds, ip_addresses):
       for res in OPEN_RESOLVERS:
         qtime, data = results.pop(0)
         if ipaddress.ip_address(ip_addresses[0]).version == 4:
-          res.add_query('ipv4', qtime, data)
+          res.add_query('ipv4', qtime)
         else:
-          res.add_query('ipv6', qtime, data)
+          res.add_query('ipv6', qtime)
 
     elif qkind == QKIND.CH:
       for proto in protos:
