@@ -1012,6 +1012,10 @@ SYS_TYPE = get_sys_type() # Determine what the OS is
 dbg_log(LOG_INFO, "SYS_TYPE:" + SYS_TYPE)
 OUTPUT['sys_type'] = SYS_TYPE
 
+dbg_log(LOG_INFO, "dnspython:" + dns.version.version + " hex:" + str(dns.version.hexversion))
+if dns.version.hexversion < 33685504:
+  death("dnspython version 2.2.0dev0 required")
+
 # Find our root servers
 ROOT_SERVERS = local_discover_root_servers()
 if not ROOT_SERVERS:
