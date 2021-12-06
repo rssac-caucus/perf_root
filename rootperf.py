@@ -123,13 +123,17 @@ class Server():
 class OpenResolver(Server):
   def __init__(self, name, ipv4, ipv6):
     Server.__init__(self, name, ipv4, ipv6)
-    self.queries = {'ipv4': [], 'ipv6': []}
+    self.queries = {'ipv4': {}, 'ipv6': {}}
+
+    # RSSAC057 does not require both, so we choose UDP
+    self.queries['ipv4']['udp'] = []
+    self.queries['ipv6']['udp'] = []
 
   def __repr__(self):
     return "name:" + self.name + " ipv4:" + str(self.ipv4) + " ipv6:" + str(self.ipv6) + " queries:" + repr(self.queries)
 
   def add_query(self, ipv, qtime):
-    self.queries[ipv].append(qtime)
+    self.queries[ipv]['udp'].append(qtime)
 
   # Convert this object to a dict and return it
   def to_dict(self):
@@ -636,7 +640,7 @@ def dns_test_cycle(tlds, ip_addresses):
     if qkind == QKIND.OPEN:
       results = POOL.starmap(timed_query, [['udp', '.', ip, qkind] for ip in ip_addresses])
       for res in OPEN_RESOLVERS:
-        qtime, data = results.pop(0)
+        qtime, _ = results.pop(0)
         if ipaddress.ip_address(ip_addresses[0]).version == 4:
           res.add_query('ipv4', qtime)
         else:
