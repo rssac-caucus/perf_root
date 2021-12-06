@@ -51,7 +51,7 @@ LOG_WARN = 1
 LOG_INFO = 2
 LOG_DEBUG = 3
 LOG_OUTPUT = 'tty' # 'tty' | 'file' | False
-LOG_FNAME = 'perf_root.log'
+LOG_FNAME = 'root_perf.log'
 LOG_SIZE = 1024 # Max logfile size in KB
 
 SIG_CHARS = 7 # How many significant characters to display in fancy output
@@ -88,6 +88,21 @@ STATIC_OPEN_RESOLVERS = [ # List of open resolvers to test
 {'name': 'OpenDNS', 'a': '208.67.220.220', 'aaaa': '2620:119:35::35'},
 {'name': 'Quad9', 'a': '9.9.9.9', 'aaaa': '2620:fe::9'}
 ]
+
+# WHOAMI servers, RSSAC057 Section 3.4
+WHOAMI_SERVERS_4 = [
+{'server': 'akamai.net', 'qname': 'whoami.akamai.net', 'rr': 'A'},
+{'server': 'google.com', 'qname': 'o-o.myaddr.l.google.com', 'rr': 'TXT'},
+{'server': 'v4.powerdns.org', 'qname': 'whoami.v4.powerdns.org', 'rr': 'A'}
+]
+
+WHOAMI_SERVERS_6 = [
+{'server': 'akamai.net', 'qname': 'whoami.akamai.net', 'rr': 'AAAA'},
+{'server': 'google.com', 'qname': 'o-o.myaddr.l.google.com', 'rr': 'TXT'},
+{'server': 'v6.powerdns.org', 'qname': 'whoami.v6.powerdns.org', 'rr': 'AAAA'}
+]
+
+
 
 # These correspond to the query kinds from RSSAC057 section 3.2
 # https://www.icann.org/en/system/files/files/rssac-057-09sep21-en.pdf
@@ -311,7 +326,7 @@ def send_walk_query(qstr):
   dbg_log(LOG_DEBUG, "Using server:" + server)
 
   try:
-    rv = dns.query.udp(query, server, ignore_unexpected=True, timeout=args.query_timeout)
+    rv = dns.query.udp(query, server, ignore_unexpected=True, timeout=ARGS.query_timeout)
   except dns.exception.Timeout:
     dbg_log(LOG_WARN, "send_walk_query: query timeout " + server + " qname:" + qstr)
     return None
@@ -539,7 +554,7 @@ def tcp_timed_query(query, ip):
 
     sock.connect((ip, 53))
     start_time = time.monotonic()
-    response = dns.query.tcp(query, '', timeout=args.query_timeout, sock=sock)
+    response = dns.query.tcp(query, '', timeout=ARGS.query_timeout, sock=sock)
 
   except dns.exception.Timeout:
     dbg_log(LOG_WARN, "tcp_timed_query:query_timeout: ip:" + ip)
@@ -584,7 +599,7 @@ def udp_timed_query(query, ip):
 
   try:
     start_time = time.monotonic()
-    response = dns.query.udp(query, ip, timeout=args.query_timeout)
+    response = dns.query.udp(query, ip, timeout=ARGS.query_timeout)
   except dns.exception.Timeout:
     dbg_log(LOG_WARN, "udp_timed_query:query_timeout: ip:" + ip)
     return -1, 'query_timeout'
@@ -615,9 +630,9 @@ def udp_timed_query(query, ip):
 def dns_test_cycle(tlds, ip_addresses):
   rv = []
   protos = []
-  if not args.no_udp:
+  if not ARGS.no_udp:
     protos.append('udp')
-  if not args.no_tcp:
+  if not ARGS.no_tcp:
     protos.append('tcp')
 
   for qkind in QKIND:
@@ -681,7 +696,7 @@ def trace_route(binary, ip):
     return []
 
   # Delay start time to prevent packet drops at first gateway
-  time.sleep(random.uniform(1, args.num_threads))
+  time.sleep(random.uniform(1, ARGS.num_threads))
 
   rv = []
   cmd = binary + " -n -p 53 -m 32 " + str(ip)
@@ -732,13 +747,13 @@ def local_discover_root_servers():
   try:
     d = dns.resolver.Resolver()
   except dns.exception.DNSException as e:
-    dbg_log(LOG_WARN, "Local resolver not found " + repr(e))
+    dbg_log(LOG_WARN, "local_discover_root_servers: Local resolver not found " + repr(e))
     return None
 
   try:
-    resp = d.resolve('.', 'NS', search=True)
+    resp = d.resolve('.', 'NS', search=True) # TODO: Should 'search' really be True here?
   except dns.exception.DNSException as e:
-    dbg_log(LOG_WARN, "Failed to query local resolver for . " + repr(e))
+    dbg_log(LOG_WARN, "local_discover_root_servers: Failed to query local resolver for . " + repr(e))
     return None
 
   names = [str(name).strip('.').lower() for name in resp.rrset]
@@ -748,13 +763,13 @@ def local_discover_root_servers():
     try:
       resp_a = d.resolve(name, 'A', search=True)
     except dns.exception.DNSException as e:
-      dbg_log(LOG_WARN, "Failed querying A record for " + name + " " + repr(e))
+      dbg_log(LOG_WARN, "local_discover_root_servers: Failed querying A record for " + name + " " + repr(e))
       return None
 
     try:
       resp_aaaa = d.resolve(name, 'AAAA', search=True)
     except dns.exception.DNSException as e:
-      dbg_log(LOG_WARN, "Failed querying AAAA record for " + name + " " + repr(e))
+      dbg_log(LOG_WARN, "local_discover_root_servers: Failed querying AAAA record for " + name + " " + repr(e))
       return None
 
     rv.append(RootServer(name, str(resp_a.rrset[0]), str(resp_aaaa.rrset[0])))
@@ -777,7 +792,7 @@ def auth_discover_root_servers(fn):
     dbg_log(LOG_DEBUG, "auth_discover_root_servers: Trying destination:" + dest)
 
     try:
-      primer = fn(query, dest, timeout=args.query_timeout)
+      primer = fn(query, dest, timeout=ARGS.query_timeout)
       dbg_log(LOG_DEBUG, repr(primer.section_from_number(3)))
     except dns.exception.Timeout:
       dbg_log(LOG_WARN, "auth_discover_root_servers: query timeout " + dest)
@@ -818,6 +833,69 @@ def auth_discover_root_servers(fn):
         return [RootServer(disc['dn'], disc['v4'], disc['v6']) for disc in discovered]
 
   return None
+
+# Makes queries to WHOAMI servers and determines our external IPv4 and IPv6 addresses
+# Returns a tuple of strings (IPv4_address, IPv6_address)
+def discover_whoami():
+  def get_ip(ver): # Perform all the DNS queries and return a string
+    if ver == 4:
+      whoami_servers = WHOAMI_SERVERS_4
+    else:
+      whoami_servers = WHOAMI_SERVERS_6
+
+    for entry in whoami_servers:
+      try:
+        resp_ns = stub.resolve(entry['server'], 'NS', search=False)
+      except:
+        continue
+
+      for ns in resp_ns.rrset:
+        try:
+          if ver == 4:
+            resp_ip = stub.resolve(ns.to_text(), 'A', search=False)
+          else:
+            resp_ip = stub.resolve(ns.to_text(), 'AAAA', search=False)
+        except:
+          continue
+
+        for ip in resp_ip.rrset:
+          auth_query = dns.message.make_query(entry['qname'], entry['rr'])
+          try:
+            auth_resp = dns.query.udp(auth_query, ip.to_text(), timeout=ARGS.query_timeout)
+          except:
+            continue
+
+          if auth_resp.rcode() != 0:
+            continue
+
+          ip_address = auth_resp.answer[0].to_text().split(' ')[-1].strip("\"")
+          if ver == 4:
+            try:
+              if ipaddress.ip_address(ip_address).version == 4:
+                return ip_address
+            except:
+              continue
+          else:
+            try:
+              if ipaddress.ip_address(ip_address).version == 6:
+                return ip_address
+            except:
+              continue
+
+    return ''
+
+  try:
+    stub = dns.resolver.Resolver()
+  except:
+    dbg_log(LOG_ERROR, "determine_whoami: Local resolver not found")
+    return 'determine_whoami: Local resolver not found'
+
+  ipv4 = ipv6 = ''
+  if not ARGS.no_v4:
+    ipv4 = get_ip(4)
+  if not ARGS.no_v6 and IPV6_SUPPORT:
+    ipv6 = get_ip(6)
+  return ipv4, ipv6
 
 # Returns the type of system we are running on
 # Returns either: linux, fbsd, nbsd, obsd, darwin, win32, cygwin
@@ -917,16 +995,16 @@ ap.add_argument('--no-ipv6', action='store_true', default=False,
 ap.add_argument('--no-traceroute', action='store_true', default=False,
                   dest='no_traceroute', help='Turn off IPv4 and IPv6 traceroute')
 
-args = ap.parse_args()
+ARGS = ap.parse_args()
 
-LOG_LEVEL = min(args.verbose, LOG_DEBUG)
+LOG_LEVEL = min(ARGS.verbose, LOG_DEBUG)
 fancy_output(0, "\rBegin Execution")
 random.seed()
 
-if args.no_v4 and args.no_v6:
+if ARGS.no_v4 and ARGS.no_v6:
   death("Both IPv4 and IPv6 disabled")
 
-if args.no_udp and args.no_tcp:
+if ARGS.no_udp and ARGS.no_tcp:
   death("Both TCP and UDP disabled")
 
 SYS_TYPE = get_sys_type() # Determine what the OS is
@@ -950,7 +1028,7 @@ OPEN_RESOLVERS = [OpenResolver(res['name'], res['a'], res['aaaa']) for res in ST
 fancy_output(1, "\rUsing " + str(len(OPEN_RESOLVERS)) + " open resolvers")
 
 # Is IPv6 supported on this host?
-if not args.no_v6:
+if not ARGS.no_v6:
   IPV6_SUPPORT = True
   try:
     s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
@@ -960,29 +1038,29 @@ if not args.no_v6:
     dbg_log(LOG_INFO, "No local IPv6 configured")
     IPV6_SUPPORT = False
 
-if args.no_v4 and not IPV6_SUPPORT:
+if ARGS.no_v4 and not IPV6_SUPPORT:
   death("IPv4 disabled and IPv6 not configured")
 
 # Die if user requested traceroute and binaries cannot be found
-if not args.no_traceroute:
-  if not args.no_v4 and not find_binary('traceroute'):
+if not ARGS.no_traceroute:
+  if not ARGS.no_v4 and not find_binary('traceroute'):
     dbg_log(LOG_DEBUG, "No traceroute binary found in " + repr(SEARCH_PATH))
     death("IPv4 traceroute requested but traceroute binary not found, try running with --no-traceroute option")
-  if not args.no_v6 and not find_binary('traceroute6'):
+  if not ARGS.no_v6 and not find_binary('traceroute6'):
     dbg_log(LOG_DEBUG, "No traceroute6 binary found in " + repr(SEARCH_PATH))
     death("IPv6 traceroute requested but traceroute6 binary not found, try running with --no-traceroute option")
 
 # Make our list of TLDs
-if not args.tlds.isascii():
+if not ARGS.tlds.isascii():
   death("Invalid --tlds argument")
-if args.tlds.isdecimal():
-  if int(args.tlds) < 1 or int(args.tlds) > TLDS_MAX:
+if ARGS.tlds.isdecimal():
+  if int(ARGS.tlds) < 1 or int(ARGS.tlds) > TLDS_MAX:
     death("--tlds out of bounds")
   else:
     # This ranges from 'aa' to 'zz'
-    tlds = find_tlds(chr(random.randint(97, 122)) + chr(random.randint(97, 122)), int(args.tlds))
+    tlds = find_tlds(chr(random.randint(97, 122)) + chr(random.randint(97, 122)), int(ARGS.tlds))
 else:
-  tlds = args.tlds.replace('.', '').lower().split(',')
+  tlds = ARGS.tlds.replace('.', '').lower().split(',')
   if not all(map(is_valid_dns_label, tlds)):
     death("--tlds contains invalid TLD")
 fancy_output(1, "\rFound " + str(len(tlds)) + " TLDs")
@@ -991,21 +1069,25 @@ fancy_output(1, "\rFound " + str(len(tlds)) + " TLDs")
 # signal catching is broken on OpenBSD if we use threads(ThreadPool) or processes(Pool)
 # Keeping this IF stmt here as I suspect different platforms will break differently with this
 if SYS_TYPE == 'linux':
-  POOL = multiprocessing.pool.ThreadPool(processes=args.num_threads)
+  POOL = multiprocessing.pool.ThreadPool(processes=ARGS.num_threads)
 elif SYS_TYPE == 'fbsd':
-  POOL = multiprocessing.pool.ThreadPool(processes=args.num_threads)
+  POOL = multiprocessing.pool.ThreadPool(processes=ARGS.num_threads)
 else:
   death('Unsupported platform' + SYS_TYPE)
+
+# Discover our external IP addresses
+OUTPUT['external_ipv4'], OUTPUT['external_ipv6'] = discover_whoami()
+fancy_output(1, "\rDiscovered external IPs " + OUTPUT['external_ipv4'] + " " + OUTPUT['external_ipv6'])
 
 OUTPUT['timestamps'] = {}
 OUTPUT['timestamps']['start'] = datetime.datetime.utcnow().isoformat('T', timespec='seconds') + 'Z'
 
 # Perform IPv4 tests
-if not args.no_v4:
+if not ARGS.no_v4:
   ipv4_addresses = [rsi.ipv4 for rsi in ROOT_SERVERS]
 
-  if not args.no_traceroute:
-    fancy_output(0, "\rRunning traceroute with " + str(args.num_threads) + " threads")
+  if not ARGS.no_traceroute:
+    fancy_output(0, "\rRunning traceroute with " + str(ARGS.num_threads) + " threads")
     traces = POOL.starmap(trace_route, zip(itertools.repeat(find_binary('traceroute')), ipv4_addresses))
     lengths = []
     for rsi,trace in zip(ROOT_SERVERS, traces):
@@ -1014,17 +1096,17 @@ if not args.no_v4:
       rsi.traceroute_v4 = trace
     fancy_stats(5, "\rtraceroute hops ", lengths)
 
-  fancy_output(0, "\rQuerying on IPv4 with " + str(args.num_threads) + " threads")
-  for ii in range(1, args.num_tests + 1):
-    fancy_stats(args.delay, "\rRSI IPv4 query times cycle:" + str(ii),
+  fancy_output(0, "\rQuerying on IPv4 with " + str(ARGS.num_threads) + " threads")
+  for ii in range(1, ARGS.num_tests + 1):
+    fancy_stats(ARGS.delay, "\rRSI IPv4 query times cycle:" + str(ii),
                   dns_test_cycle(tlds, ipv4_addresses))
 
 # Perform IPv6 tests
-if not args.no_v6 and IPV6_SUPPORT:
+if not ARGS.no_v6 and IPV6_SUPPORT:
   ipv6_addresses = [rsi.ipv6 for rsi in ROOT_SERVERS]
 
-  if not args.no_traceroute:
-    fancy_output(0, "\rRunning traceroute6 with " + str(args.num_threads) + " threads")
+  if not ARGS.no_traceroute:
+    fancy_output(0, "\rRunning traceroute6 with " + str(ARGS.num_threads) + " threads")
     traces = POOL.starmap(trace_route, zip(itertools.repeat(find_binary('traceroute6')), ipv6_addresses))
     lengths = []
     for rsi,trace in zip(ROOT_SERVERS, traces):
@@ -1033,9 +1115,9 @@ if not args.no_v6 and IPV6_SUPPORT:
       rsi.traceroute_v6 = trace
     fancy_stats(5, "\rtraceroute6 hops ", lengths)
 
-  fancy_output(0.5, "\rQuerying on IPv6 with " + str(args.num_threads) + " threads")
-  for ii in range(1, args.num_tests + 1):
-    fancy_stats(args.delay, "\rRSI IPv6 query times cycle:" + str(ii),
+  fancy_output(0.5, "\rQuerying on IPv6 with " + str(ARGS.num_threads) + " threads")
+  for ii in range(1, ARGS.num_tests + 1):
+    fancy_stats(ARGS.delay, "\rRSI IPv6 query times cycle:" + str(ii),
                   dns_test_cycle(tlds, ipv6_addresses))
 
 OUTPUT['timestamps']['end'] = datetime.datetime.utcnow().isoformat('T', timespec='seconds') + 'Z'
@@ -1048,13 +1130,13 @@ OUTPUT['RSIs'] = [rsi.to_dict() for rsi in ROOT_SERVERS]
 OUTPUT['open_resolvers'] = [res.to_dict() for res in OPEN_RESOLVERS]
 out_str = json.dumps(OUTPUT, indent=2)
 
-if len(args.out_file) > 0:
+if len(ARGS.out_file) > 0:
   try:
-    fh = open(args.out_file, 'w')
+    fh = open(ARGS.out_file, 'w')
     fh.write(out_str)
     fh.close()
   except OSError:
-    death("Unable to write to " + args.out_file)
+    death("Unable to write to " + ARGS.out_file)
 else:
   print(out_str)
 
