@@ -1097,7 +1097,7 @@ if not ARGS.no_v4:
     traces = POOL.starmap(trace_route, zip(itertools.repeat(find_binary('traceroute')), ipv4_addresses))
     lengths = []
     for rsi,trace in zip(ROOT_SERVERS, traces):
-      dbg_log(LOG_DEBUG, "traceroute_" + rsi.name + " len:" + str(len(trace)) + " first:" + repr(trace[0]))
+      dbg_log(LOG_DEBUG, "traceroute:" + rsi.name + " len:" + str(len(trace)))
       lengths.append(len(trace))
       rsi.traceroute_v4 = trace
     fancy_stats(5, "\rtraceroute hops ", lengths)
@@ -1116,7 +1116,7 @@ if not ARGS.no_v6 and IPV6_SUPPORT:
     traces = POOL.starmap(trace_route, zip(itertools.repeat(find_binary('traceroute6')), ipv6_addresses))
     lengths = []
     for rsi,trace in zip(ROOT_SERVERS, traces):
-      dbg_log(LOG_DEBUG, "traceroute6_" + rsi.name + " len:" + str(len(trace)) + " first:" + repr(trace[0]))
+      dbg_log(LOG_DEBUG, "traceroute6:" + rsi.name + " len:" + str(len(trace)))
       lengths.append(len(trace))
       rsi.traceroute_v6 = trace
     fancy_stats(5, "\rtraceroute6 hops ", lengths)
