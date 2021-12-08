@@ -1,14 +1,12 @@
-When started perf_root crawls the DNS root zone for a number of
-TLDs. It then issues timed queries to each root server identity over UDP and TCP, IPv4
-and IPv6. Traceroutes are also performed to each root server identity
-over IPv4 and IPv6.
+rootperf.py performs DNS queries and traceroutes to the DNS root servers. Results of these tests are then output in JSON.
 
-Results of these tests are then output in JSON.
+By default rootperf.py performs the tests specified in
+RSSAC057.
 
 ## Usage
 ``
-perf_root.py [-h] [-d DELAY] [-n NUM_TLDS] [-o OUT_FILE]
-                    [-q QUERY_TIMEOUT] [-t NUM_TESTS] [-v]
+rootperf.py [-h] [-d DELAY] [-n NUM_TESTS] [-o OUT_FILE]
+                    [-q QUERY_TIMEOUT] [-t TLDS] [-v]
                     [--threads {1,2,3,4,5,6}] [--no-tcp] [--no-udp]
                     [--no-ipv4] [--no-ipv6] [--no-traceroute]
 ``
@@ -19,41 +17,51 @@ show this help message and exit
 ``-d DELAY, --delay DELAY``
 Delay between tests in seconds (default: 0.05)
 
-``-n NUM_TLDS, --num-tlds NUM_TLDS``
-Number of TLDs to test (default: 10)
+``-n NUM_TESTS, --num-tests NUM_TESTS``
+Number of test cycles per-TLD (default: 10)
 
 ``-o OUT_FILE, --out-file OUT_FILE``
 Filename for output (default: )
 
-``-q QUERY_TIMEOUT, --query-timeout QUERY_TIMEOUT``
-DNS query timeout in seconds (default: 10)
+By default rootperf.py outputs to the user's tty.
 
-``-t NUM_TESTS, --num-tests NUM_TESTS``
-Number of tests per-TLD (default: 2)
+``-q QUERY_TIMEOUT, --query-timeout QUERY_TIMEOUT``
+DNS query timeout in seconds (default: 1)
+
+`` -t TLDS, --tlds TLDS ``
+Comma separated list of TLDs to query, or number between 1 and 100 for
+random TLDs (default: com)
+
+If passed a comma separated list of TLDs rootperf.py will use them. If
+passed a number between 1-100 rootperf.py will choose a random place
+in the root zone then crawl it to determine a random set of TLDs to use.
 
 ``-v, --verbose``
-Verbose output, repeat for increased verbosity
+Verbose output, repeat for increased verbosity (max: 3)
 
 ``--threads {1,2,3,4,5,6}``
 Number of threads to run concurrently (default: 6)
 
+By default each test is run asynchronously using a pool of
+threads. Decreasing the number of threads could theorhetically provide
+more accurate results at the expense of test duration.
+
 ``--no-tcp``
-Turn off TCP testing
+Disable TCP testing
 
 ``--no-udp``
-Turn off UDP testing
+Disable UDP testing
 
 ``--no-ipv4``
-Turn off IPv4 testing
+Disable IPv4 testing
 
 ``--no-ipv6``
-Turn off IPv6 testing
+Disable IPv6 testing
 
 ``--no-traceroute``
-Turn off traceroute for both IPv4 and IPv6
+Disable traceroute for both IPv4 and IPv6
 
-If --out-file is not specified stdout is used. UDP port 53 is used for
-traceroute probes.
+UDP port 53 is used for traceroute probes.
 
 # Installation
-perf_root.py requires Python3 and the dnspython library.
+rootperf.py requires Python3 and dnspython 2.2.0 or higher.

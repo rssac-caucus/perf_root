@@ -973,28 +973,28 @@ ap.add_argument('-n', '--num-tests', type=int, action='store', default=10,
                   dest='num_tests', help='Number of test cycles per-TLD')
 ap.add_argument('-o', '--out-file', type=str, action='store', default='',
                   dest='out_file', help='Filename for output')
-ap.add_argument('-q', '--query-timeout', type=int, action='store', default=10,
+ap.add_argument('-q', '--query-timeout', type=int, action='store', default=1,
                   dest='query_timeout', help='DNS query timeout in seconds')
 ap.add_argument('-t', '--tlds', type=str, action='store', default='com',
                   dest='tlds', help='Comma separated list of TLDs to query, or number between 1 and ' + str(TLDS_MAX) + ' for random TLDs')
 ap.add_argument('-v', '--verbose', action='count', default=0,
-                  dest='verbose', help='Verbose output, repeat for increased verbosity')
+                  dest='verbose', help='Verbose output, repeat for increased verbosity (max: 3)')
 
 ap.add_argument('--threads', type=int, action='store', default=6, choices=[1,2,3,4,5,6],
                   dest='num_threads', help='Number of threads to run concurrently')
 
 ap.add_argument('--no-tcp', action='store_true', default=False,
-                  dest='no_tcp', help='Turn off TCP testing')
+                  dest='no_tcp', help='Disable TCP testing')
 ap.add_argument('--no-udp', action='store_true', default=False,
-                  dest='no_udp', help='Turn off UDP testing')
+                  dest='no_udp', help='Disable UDP testing')
 
 ap.add_argument('--no-ipv4', action='store_true', default=False,
-                  dest='no_v4', help='Turn off IPv4 testing')
+                  dest='no_v4', help='Disable IPv4 testing')
 ap.add_argument('--no-ipv6', action='store_true', default=False,
-                  dest='no_v6', help='Turn off IPv6 testing')
+                  dest='no_v6', help='Disable IPv6 testing')
 
 ap.add_argument('--no-traceroute', action='store_true', default=False,
-                  dest='no_traceroute', help='Turn off IPv4 and IPv6 traceroute')
+                  dest='no_traceroute', help='Disable IPv4 and IPv6 traceroute')
 
 ARGS = ap.parse_args()
 
