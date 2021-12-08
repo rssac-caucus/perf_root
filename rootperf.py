@@ -270,7 +270,7 @@ def fancy_output(delay, ss):
   if LOG_LEVEL <= LOG_ERROR:
     return
 
-  if LOG_LEVEL >= LOG_DEBUG:
+  if LOG_LEVEL >= LOG_INFO:
     dbg_log(LOG_INFO, ss)
     return
 
