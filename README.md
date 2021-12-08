@@ -34,7 +34,7 @@ random TLDs (default: com)
 
 If passed a comma separated list of TLDs rootperf.py will use them. If
 passed a number between 1-100 rootperf.py will choose a random place
-in the root zone then crawl it to determine a random set of TLDs to use.
+in the root zone then crawl it until enough TLDs are discovered for testing.
 
 ``-v, --verbose``
 Verbose output, repeat for increased verbosity (max: 3)
@@ -43,7 +43,7 @@ Verbose output, repeat for increased verbosity (max: 3)
 Number of threads to run concurrently (default: 6)
 
 By default each test is run asynchronously using a pool of
-threads. Decreasing the number of threads could theorhetically provide
+threads. Decreasing the number of threads could provide
 more accurate results at the expense of test duration.
 
 ``--no-tcp``
