@@ -1082,7 +1082,8 @@ else:
 
 # Discover our external IP addresses
 OUTPUT['external_ipv4'], OUTPUT['external_ipv6'] = discover_whoami()
-fancy_output(1, "\rDiscovered external IPs " + OUTPUT['external_ipv4'] + " " + OUTPUT['external_ipv6'])
+fancy_output(1, "\rExternal IPv4: " + OUTPUT['external_ipv4'])
+fancy_output(1, "\rExternal IPv6: " + OUTPUT['external_ipv6'])
 
 OUTPUT['timestamps'] = {}
 OUTPUT['timestamps']['start'] = datetime.datetime.utcnow().isoformat('T', timespec='seconds') + 'Z'
