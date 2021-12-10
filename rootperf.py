@@ -258,7 +258,7 @@ def dbg_log(lvl, dbgStr):
     except IOError:
       death("IOError writing to debug file " + LOG_FNAME)
   elif LOG_OUTPUT == 'tty':
-    print(outStr)
+    print(outStr, flush=True)
 
 # Silent at LOG_ERROR
 # Fancier output at LOG_WARN and LOG_INFO
@@ -283,14 +283,17 @@ def fancy_output(delay, ss):
     dbg_log(LOG_ERROR, "fancy_output: print window exceeded")
     return
 
-  if ss[0] != '\r':
-    ss = '\r' + ss
+  if sys.stdout.isatty():
+    if ss[0] != '\r':
+      ss = '\r' + ss
 
-  sys.stdout.write(ss)
-  for ii in range(window - len(ss)):
-    sys.stdout.write(' ')
+    sys.stdout.write(ss)
+    for ii in range(window - len(ss)):
+      sys.stdout.write(' ')
+    sys.stdout.flush()
+  else:
+    print(ss.strip(), flush=True)
 
-  sys.stdout.flush()
   time.sleep(delay)
 
 # Prints fancy_output for stats
@@ -299,7 +302,7 @@ def fancy_stats(delay, prefix, vals):
   median = str(statistics.median(vals))[:SIG_CHARS]
   minimum = str(min(vals))[:SIG_CHARS]
   maximum = str(max(vals))[:SIG_CHARS]
-  fancy_output(delay, "\r" + prefix + " min:" + minimum + " max:" + maximum + " median:" + median)
+  fancy_output(delay, prefix + " min:" + minimum + " max:" + maximum + " median:" + median)
 
 # Takes a string
 # Returns True if it is a valid DNS label, otherwise False
@@ -1002,7 +1005,7 @@ ap.add_argument('--no-traceroute', action='store_true', default=False,
 ARGS = ap.parse_args()
 
 LOG_LEVEL = min(ARGS.verbose, LOG_DEBUG)
-fancy_output(0, "\rBegin Execution")
+fancy_output(0, "Begin Execution")
 random.seed()
 
 if ARGS.no_v4 and ARGS.no_v6:
@@ -1029,11 +1032,11 @@ if not ROOT_SERVERS:
   ROOT_SERVERS = auth_discover_root_servers(dns.query.udp)
 if not ROOT_SERVERS:
   death("Unable to contact any root servers")
-fancy_output(1, "\rFound " + str(len(ROOT_SERVERS)) + " root servers")
+fancy_output(1, "Found " + str(len(ROOT_SERVERS)) + " root servers")
 
 # Init our open resolvers
 OPEN_RESOLVERS = [OpenResolver(res['name'], res['a'], res['aaaa']) for res in STATIC_OPEN_RESOLVERS]
-fancy_output(1, "\rUsing " + str(len(OPEN_RESOLVERS)) + " open resolvers")
+fancy_output(1, "Using " + str(len(OPEN_RESOLVERS)) + " open resolvers")
 
 # Is IPv6 supported on this host?
 if not ARGS.no_v6:
@@ -1071,7 +1074,7 @@ else:
   tlds = ARGS.tlds.replace('.', '').lower().split(',')
   if not all(map(is_valid_dns_label, tlds)):
     death("--tlds contains invalid TLD")
-fancy_output(1, "\rFound " + str(len(tlds)) + " TLDs")
+fancy_output(1, "Found " + str(len(tlds)) + " TLDs")
 
 # Our global pool of worker threads/processes
 # signal catching is broken on OpenBSD if we use threads(ThreadPool) or processes(Pool)
@@ -1085,8 +1088,8 @@ else:
 
 # Discover our external IP addresses
 OUTPUT['external_ipv4'], OUTPUT['external_ipv6'] = discover_whoami()
-fancy_output(1, "\rExternal IPv4: " + OUTPUT['external_ipv4'])
-fancy_output(1, "\rExternal IPv6: " + OUTPUT['external_ipv6'])
+fancy_output(1, "External IPv4: " + OUTPUT['external_ipv4'])
+fancy_output(1, "External IPv6: " + OUTPUT['external_ipv6'])
 
 OUTPUT['timestamps'] = {}
 OUTPUT['timestamps']['start'] = datetime.datetime.utcnow().isoformat('T', timespec='seconds') + 'Z'
@@ -1096,18 +1099,18 @@ if not ARGS.no_v4:
   ipv4_addresses = [rsi.ipv4 for rsi in ROOT_SERVERS]
 
   if not ARGS.no_traceroute:
-    fancy_output(0, "\rRunning traceroute with " + str(ARGS.num_threads) + " threads")
+    fancy_output(0, "Running traceroute with " + str(ARGS.num_threads) + " threads")
     traces = POOL.starmap(trace_route, zip(itertools.repeat(find_binary('traceroute')), ipv4_addresses))
     lengths = []
     for rsi,trace in zip(ROOT_SERVERS, traces):
       dbg_log(LOG_DEBUG, "traceroute:" + rsi.name + " len:" + str(len(trace)))
       lengths.append(len(trace))
       rsi.traceroute_v4 = trace
-    fancy_stats(5, "\rtraceroute hops ", lengths)
+    fancy_stats(5, "traceroute hops ", lengths)
 
-  fancy_output(0, "\rQuerying on IPv4 with " + str(ARGS.num_threads) + " threads")
+  fancy_output(0, "Querying on IPv4 with " + str(ARGS.num_threads) + " threads")
   for ii in range(1, ARGS.num_tests + 1):
-    fancy_stats(ARGS.delay, "\rRSI IPv4 query times cycle:" + str(ii),
+    fancy_stats(ARGS.delay, "RSI IPv4 query times cycle:" + str(ii),
                   dns_test_cycle(tlds, ipv4_addresses))
 
 # Perform IPv6 tests
@@ -1115,23 +1118,23 @@ if not ARGS.no_v6 and IPV6_SUPPORT:
   ipv6_addresses = [rsi.ipv6 for rsi in ROOT_SERVERS]
 
   if not ARGS.no_traceroute:
-    fancy_output(0, "\rRunning traceroute6 with " + str(ARGS.num_threads) + " threads")
+    fancy_output(0, "Running traceroute6 with " + str(ARGS.num_threads) + " threads")
     traces = POOL.starmap(trace_route, zip(itertools.repeat(find_binary('traceroute6')), ipv6_addresses))
     lengths = []
     for rsi,trace in zip(ROOT_SERVERS, traces):
       dbg_log(LOG_DEBUG, "traceroute6:" + rsi.name + " len:" + str(len(trace)))
       lengths.append(len(trace))
       rsi.traceroute_v6 = trace
-    fancy_stats(5, "\rtraceroute6 hops ", lengths)
+    fancy_stats(5, "traceroute6 hops ", lengths)
 
-  fancy_output(0.5, "\rQuerying on IPv6 with " + str(ARGS.num_threads) + " threads")
+  fancy_output(0.5, "Querying on IPv6 with " + str(ARGS.num_threads) + " threads")
   for ii in range(1, ARGS.num_tests + 1):
-    fancy_stats(ARGS.delay, "\rRSI IPv6 query times cycle:" + str(ii),
+    fancy_stats(ARGS.delay, "RSI IPv6 query times cycle:" + str(ii),
                   dns_test_cycle(tlds, ipv6_addresses))
 
 OUTPUT['timestamps']['end'] = datetime.datetime.utcnow().isoformat('T', timespec='seconds') + 'Z'
 POOL.close()
-fancy_output(0, "\rFinished testing")
+fancy_output(0, "Finished testing")
 print()
 
 # Create output and write it
