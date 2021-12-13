@@ -1032,8 +1032,9 @@ dbg_log(LOG_INFO, "SYS_TYPE:" + SYS_TYPE)
 OUTPUT['sys_type'] = SYS_TYPE
 
 dbg_log(LOG_INFO, "dnspython:" + dns.version.version + " hex:" + str(dns.version.hexversion))
-if dns.version.hexversion < 33685504:
-  death("dnspython version 2.2.0 or higher required")
+OUTPUT['dnspython_version'] = dns.version.version
+if dns.version.hexversion < 33554672:
+  death("dnspython version 2.0.0 or higher required")
 
 # Find our root servers
 ROOT_SERVERS = local_discover_root_servers()
