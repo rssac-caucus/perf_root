@@ -64,4 +64,4 @@ Disable traceroute for both IPv4 and IPv6
 UDP port 53 is used for traceroute probes.
 
 # Installation
-rootperf.py requires Python3 and dnspython 2.2.0 or higher.
+rootperf.py requires Python3 and dnspython 2.0.0 or higher.
