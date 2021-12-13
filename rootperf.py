@@ -62,6 +62,7 @@ DNS_MAX_QUERIES = 5 # Number of query retries before we give up
 TLDS_MAX = 100 # Max TLDs we will query
 ROOT_SERVERS = [] # Our list of DNS root servers
 OUTPUT = {} # Top-level dict to encode into JSON and output
+OUTPUT['rssac057_version'] = 1 # The version of RSSAC057 we follow
 DYING = False # Are we in the process of dying?
 
 # Where we look for executable binaries
