@@ -54,8 +54,6 @@ LOG_OUTPUT = 'tty' # 'tty' | 'file' | False
 LOG_FNAME = 'root_perf.log'
 LOG_SIZE = 1024 # Max logfile size in KB
 
-SIG_CHARS = 5 # How many significant characters to display in fancy output
-SIG_DIGITS = 7 # How many significant digits to record for timings
 SYS_TYPE = '' # Enumerated type of system we're running on: linux, bsd, darwin, win32, cygwin
 TRACEROUTE_NUM_TIMEOUTS = 5 # Number of consecutive timed out traceroute probes we tolerate before giving up
 DNS_MAX_QUERIES = 5 # Number of query retries before we give up
@@ -306,10 +304,11 @@ def fancy_output(delay, ss):
 # Prints fancy_output for stats
 # Takes a delay, a prefix string, and a list of numeric values
 def fancy_stats(delay, prefix, vals):
-  median = str(statistics.median(vals))[:SIG_CHARS]
-  minimum = str(min(vals))[:SIG_CHARS]
-  maximum = str(max(vals))[:SIG_CHARS]
-  fancy_output(delay, prefix + " min:" + minimum + " max:" + maximum + " median:" + median)
+  points = [v for v in vals if v > 0] # Exclude negatives
+  mean = str(int(statistics.mean(points)))
+  minimum = str(min(points))
+  maximum = str(max(points))
+  fancy_output(delay, prefix + " min:" + minimum + " max:" + maximum + " mean:" + mean)
 
 # Takes a string
 # Returns True if it is a valid DNS label, otherwise False
@@ -532,7 +531,9 @@ def timed_query(proto, tld, ip, qkind):
   else:
     qtime, resp = udp_timed_query(query, ip)
 
-  qtime = round(qtime, SIG_DIGITS)
+  # Report times in milliseconds if sucessful
+  if qtime >= 0:
+    qtime = int(round(qtime, 3) * 1000)
 
   if not isinstance(resp, dns.message.Message):
     return qtime, resp
