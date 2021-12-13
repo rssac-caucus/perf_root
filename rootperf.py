@@ -515,11 +515,16 @@ def timed_query(proto, tld, ip, qkind):
 
   if qkind is QKIND.CH:
     query = dns.message.make_query('hostname.bind', 'TXT', rdclass=dns.rdataclass.CH, use_edns=False)
-    proto = 'udp'
+    query.flags &= ~dns.flags.RD
   elif qkind is QKIND.NS:
-    query = dns.message.make_query(tld, 'NS', rdclass=dns.rdataclass.IN, flags=dns.flags.CD, use_edns=True)
+    query = dns.message.make_query(tld, 'NS', rdclass=dns.rdataclass.IN, use_edns=True)
+    query.flags |= dns.flags.CD
+    query.flags &= ~dns.flags.RD
   elif qkind is QKIND.DS:
-    query = dns.message.make_query(tld, 'DS', rdclass=dns.rdataclass.IN, flags=dns.flags.CD, ednsflags=0, use_edns=True)
+    query = dns.message.make_query(tld, 'DS', rdclass=dns.rdataclass.IN, use_edns=True)
+    query.ednsflags |= dns.flags.EDNSFlag.DO
+    query.flags |= dns.flags.CD
+    query.flags &= ~dns.flags.RD
   elif qkind is QKIND.OPEN:
     query = dns.message.make_query('.', 'NS', rdclass=dns.rdataclass.IN, use_edns=False)
   else:
