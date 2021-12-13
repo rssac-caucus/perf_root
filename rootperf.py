@@ -104,6 +104,9 @@ WHOAMI_SERVERS_6 = [
 {'server': 'v6.powerdns.org', 'qname': 'whoami.v6.powerdns.org', 'rr': 'AAAA'}
 ]
 
+###########
+# Classes #
+###########
 # These correspond to the query kinds from RSSAC057 section 3.2
 # https://www.icann.org/en/system/files/files/rssac-057-09sep21-en.pdf
 class QKIND(Enum):
@@ -112,9 +115,12 @@ class QKIND(Enum):
   DS = auto() # 3.2.3
   OPEN = auto() # Open resolvers
 
-###########
-# Classes #
-###########
+# How these should display
+QKIND.CH.display = 'query_3.2.1'
+QKIND.NS.display = 'query_3.2.2'
+QKIND.DS.display = 'query_3.2.3'
+
+
 class Server():
   def __init__(self, name, ipv4, ipv6):
     self.name = name
@@ -184,7 +190,7 @@ class RootServer(Server):
     for qkind in QKIND:
       if qkind == QKIND.OPEN:
         continue
-      rv['queries'][qkind.name] = self.queries[qkind]
+      rv['queries'][qkind.display] = self.queries[qkind]
 
     #self.anonymize_traceroutes()
     rv['traceroute_v4'] = self.traceroute_v4
@@ -1139,10 +1145,9 @@ fancy_output(0, "Finished testing")
 print()
 
 # Create output and write it
-OUTPUT['RSIs'] = [rsi.to_dict() for rsi in ROOT_SERVERS]
 OUTPUT['open_resolvers'] = [res.to_dict() for res in OPEN_RESOLVERS]
+OUTPUT['RSIs'] = [rsi.to_dict() for rsi in ROOT_SERVERS]
 out_str = json.dumps(OUTPUT, indent=2)
-
 if len(ARGS.out_file) > 0:
   try:
     fh = open(ARGS.out_file, 'w')
